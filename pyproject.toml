@@ -1,0 +1,8 @@
+[build-system]
+requires = ["setuptools>=63"]
+build-backend = "setuptools.build_meta"
+
+[tool.docformatter]
+recursive = true
+wrap-summaries = 70
+wrap-descriptions = 70

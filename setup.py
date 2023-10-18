@@ -1,0 +1,60 @@
+#!/usr/bin/env python
+
+from setuptools import find_packages, setup
+
+setup(
+    name="vlmrm",
+    version="0.0.1",
+    author="FAR AI",
+    description="Using natural language instructions to safely steer RL agents",
+    python_requires=">=3.8",
+    install_requires=[
+        "boto3==1.28.43",
+        "einops==0.6.1",
+        "gitpython==3.1.32",
+        "gymnasium[classic_control,mujoco]==0.28.1",
+        "imageio==2.31.3",
+        "loguru==0.7.0",
+        "matplotlib==3.7.2",
+        "moviepy==1.0.3",
+        "numpy==1.24.4",
+        "open_clip_torch==2.20.0",
+        "opencv-contrib-python==4.8.0.76",
+        "pandas==2.0.3",
+        "pillow==10.0.0",
+        "pydantic==2.2.1",
+        "pygame==2.1.3",
+        "pyopengl==3.1.7",
+        "pyopengl_accelerate==3.1.7",
+        "stable_baselines3==2.0.0",
+        "tensorboard==2.14.0",
+        "torch==2.0.1",
+        "tqdm==4.66.1",
+        "typer[all]==0.9.0",
+        "wandb==0.15.8",
+    ],
+    extras_require={
+        "dev": [
+            "black==23.7.0",
+            "codecov==2.1.13",
+            "coverage==7.2.7",
+            "docformatter[tomli]==1.7.5",
+            "mypy==1.5.0",
+            "pre-commit==3.3.3",
+            "pytest==7.4.0",
+            "pytest-cov==4.1.0",
+            "pytest-xdist==3.3.1",
+            "pytype==2023.7.28",
+            "ruff==0.0.284",
+        ],
+    },
+    packages=find_packages("src"),
+    package_dir={"": "src"},
+    package_data={"vlmrm": ["py.typed"]},
+    entry_points={
+        "console_scripts": [
+            "vlmrm = vlmrm.cli.main:main",
+        ],
+    },
+    url="https://github.com/AlignmentResearch/vlmrm",
+)
