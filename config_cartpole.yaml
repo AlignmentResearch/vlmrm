@@ -1,10 +1,10 @@
 env_name: CartPole-v1 # RL environment name
 base_path: data/runs/training # Base path to save logs and checkpoints
 seed: 42 # Seed for reproducibility
-description: Humanoid training using CLIP reward
+description: Cartpole training using CLIP reward
 tags: # Wandb tags
   - training
-  - humanoid
+  - cartpole
   - CLIP
 reward:
   name: clip
@@ -17,26 +17,26 @@ reward:
   batch_size: 400
   alpha: 0.5 # Alpha value of Baseline CLIP (CO-RELATE)
   target_prompts: # Description of the goal state
-    - a humanoid robot kneeling
+    - pole vertically upright on top of the cart
   baseline_prompts: # Description of the environment
-    - a humanoid robot
+    - pole and cart
   # Path to pre-saved model weights. When executing multiple runs,
   # mount a volume to this path to avoid downloading the model
   # weights multiple times.
   cache_dir: .cache
 rl:
   policy_name: MlpPolicy
-  n_steps: 100000 # Total number of simulation steps to be collected.
+  n_steps: 3000000 # Total number of simulation steps to be collected.
   n_envs_per_worker: 2 # Number of environments per worker (GPU)
   episode_length: 200 # Desired episode length
-  learning_starts: 100 # Number of env steps to collect before training
+  learning_starts: 75000 # Number of env steps to collect before training
   train_freq: 200 # Number of collected env steps between training iterations
   batch_size: 64 # SAC buffer sample size per gradient step
-  gradient_steps: 1 # Number of samples to collect from the buffer per training step
+  gradient_steps: 200 # Number of samples to collect from the buffer per training step
   tau: 0.005 # SAC target network update rate
   gamma: 0.99 # SAC discount factor
-  learning_rate: 3e-4 # SAC optimizer learning rate
+  learning_rate: 2.3e-3 # SAC optimizer learning rate
 logging:
-  checkpoint_freq: 800 # Number of env steps between checkpoints
+  checkpoint_freq: 64000 # Number of env steps between checkpoints
   video_freq: 800 # Number of env steps between videos
   # tensorboard_freq: 800 # Number of env steps between tensorboard logs

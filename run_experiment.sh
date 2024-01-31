@@ -7,9 +7,14 @@
 #SBATCH --job-name=vlmrm
 #SBATCH --output=logs/job_%j.log
 
+if [ "$#" -ne 1 ]; then
+    echo "Usage: sbatch run_experiment.sh [config path]"
+    exit 1
+fi
+
 mkdir -p logs
 
 echo "Make sure you have WANDB_API_KEY set in .env"
 export $(cat .env | xargs)
 
-vlmrm train "$(cat config.yaml)"
+vlmrm train "$(cat $1)"
