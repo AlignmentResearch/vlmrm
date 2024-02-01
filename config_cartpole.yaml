@@ -36,6 +36,10 @@ rl:
   tau: 0.005 # SAC target network update rate
   gamma: 0.99 # SAC discount factor
   learning_rate: 2.3e-3 # SAC optimizer learning rate
+  policy_kwargs: # Policy-specific arguments
+    net_arch:
+      - 256
+      - 256
 logging:
   checkpoint_freq: 64000 # Number of env steps between checkpoints
   video_freq: 800 # Number of env steps between videos
