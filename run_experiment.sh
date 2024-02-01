@@ -17,4 +17,6 @@ mkdir -p logs
 echo "Make sure you have WANDB_API_KEY set in .env"
 export $(cat .env | xargs)
 
+conda activate vlmrm
+
 vlmrm train "$(cat $1)"
