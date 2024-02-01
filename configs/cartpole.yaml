@@ -33,8 +33,9 @@ rl:
   train_freq: 200 # Number of collected env steps between training iterations
   batch_size: 64 # SAC buffer sample size per gradient step
   gradient_steps: 200 # Number of samples to collect from the buffer per training step
-  tau: 0.005 # SAC target network update rate
-  gamma: 0.99 # SAC discount factor
+  # Tried to remove those, shouldn't be needed for DQN
+  # tau: 0.005 # SAC target network update rate
+  # gamma: 0.99 # SAC discount factor
   learning_rate: 2.3e-3 # SAC optimizer learning rate
   policy_kwargs: # Policy-specific arguments
     net_arch:
