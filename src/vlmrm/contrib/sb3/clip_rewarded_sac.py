@@ -16,7 +16,6 @@ from stable_baselines3.common.type_aliases import MaybeCallback, RolloutReturn
 from stable_baselines3.common.utils import check_for_correct_spaces, safe_mean
 from stable_baselines3.common.vec_env import VecEnv
 from stable_baselines3.common.vec_env.patch_gym import _convert_space
-
 from vlmrm.contrib.sb3.clip_buffer import CLIPReplayBuffer
 from vlmrm.reward_model import compute_rewards, load_reward_model_from_config
 from vlmrm.trainer.config import CLIPRewardConfig, Config
@@ -111,9 +110,12 @@ class CLIPRewardedSAC(SAC):
         assert ep_info_buffer_maxlen is not None
 
         replay_buffer_pos = self.replay_buffer.pos
+        # Number of steps we have done since last reward computation
         total_timesteps = self.num_timesteps - self.previous_num_timesteps
+        # We presume that we have done the same number of steps in each environment
         env_episode_timesteps = total_timesteps // self.env.num_envs
         total_episodes = self._episode_num - self.previous_num_episodes
+        # Number of episodes we have done in each environment
         env_episodes = total_episodes // self.env.num_envs
         assert self.config.rl.episode_length == env_episode_timesteps // env_episodes
 
