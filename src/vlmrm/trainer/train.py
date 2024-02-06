@@ -23,7 +23,7 @@ from vlmrm.contrib.sb3.make_vec_env import make_vec_env
 from vlmrm.contrib.sb3.signal_handler import end_signal_handler
 from vlmrm.contrib.sb3.subproc_vec_env import SubprocVecEnv
 from vlmrm.envs.base import get_clip_rewarded_env_name, get_make_env, is_3d_env
-from vlmrm.reward_model import dist_worker_compute_reward, load_reward_model_from_config
+from vlmrm.reward_model import RewardModel, dist_worker_compute_reward
 from vlmrm.trainer.config import CLIPRewardConfig, Config
 
 signal.signal(signal.SIGINT, end_signal_handler)
@@ -193,7 +193,7 @@ def init_process(
     config_dump: Dict[str, Any],
 ) -> None:
     os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = "29500"
+    os.environ["MASTER_PORT"] = "29502"
     # if backend == "nccl":
     # TODO: come back to this after fixing the kube setup
     # os.environ["NCCL_SHM_DISABLE"] = "1"
@@ -209,7 +209,11 @@ def clip_inference_worker(rank: int, config: Config, stop_event: multiprocessing
     assert isinstance(config.reward, CLIPRewardConfig)
     assert config.reward.batch_size % config.rl.n_workers == 0
     logger.info(f"[Worker {rank}] Loading CLIP model....")
-    reward_model = load_reward_model_from_config(config.reward).eval().cuda(rank)
+    reward_model = (
+        RewardModel.from_config(config.reward, episode_length=config.rl.episode_length)
+        .eval()
+        .cuda(rank)
+    )
     worker_frames_tensor = torch.zeros(
         (config.reward.batch_size // config.rl.n_workers, *config.render_dim),
         dtype=torch.uint8,

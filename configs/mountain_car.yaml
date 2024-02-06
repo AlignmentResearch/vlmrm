@@ -24,12 +24,17 @@ reward:
   # mount a volume to this path to avoid downloading the model
   # weights multiple times.
   cache_dir: .cache
+  # Stuff below added on top of VLMRM
+  embed_type: "avg_frame"
+  reward_type: "projection"
+  window_size: 1
+  window_step: 1
 rl:
   policy_name: MlpPolicy
   n_steps: 3000000 # Total number of simulation steps to be collected.
   n_envs_per_worker: 1 # Number of environments per worker (GPU)
   episode_length: 200 # Desired episode length
-  learning_starts: 100 # Number of env steps to collect before training
+  learning_starts: 75000 # Number of env steps to collect before training
   train_freq: 200 # Number of collected env steps between training iterations
   batch_size: 256 # SAC buffer sample size per gradient step
   gradient_steps: 400 # Number of samples to collect from the buffer per training step

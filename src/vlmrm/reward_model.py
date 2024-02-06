@@ -1,25 +1,25 @@
-from typing import List, Literal, Optional, Tuple, overload
+from typing import List, Optional, Protocol, Tuple
 
 import open_clip
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from einops import rearrange, reduce, repeat
+from einops import rearrange, reduce
 from torch.amp.autocast_mode import autocast
 
 from vlmrm.contrib.open_clip.transform import image_transform
 from vlmrm.trainer.config import CLIPRewardConfig
 
 
-class BaseModel(nn.Module):
+class BaseModel(Protocol):
     def embed_text(self, x) -> torch.Tensor:
-        raise NotImplementedError
+        ...
 
     def embed_image(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError
+        ...
 
 
-class CLIP(BaseModel):
+class CLIP(nn.Module):
     _model: open_clip.model.CLIP
 
     def __init__(self, model_name: str, pretrained: str, cache_dir: str):
@@ -44,72 +44,53 @@ class CLIP(BaseModel):
 
 
 class Embed(nn.Module):
-    def __init__(self, embed_model):
-        super().__init__()
-        self.embed_model = embed_model
-
-    @torch.inference_mode()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Embed a batch of image chunks.
-
-        Args:
-            x (Tensor): Tensor of shape (n_frames, n_chunks, n_episodes, channels, height, width).
-
-        Returns:
-            Tensor: Tensor of shape (n_chunks, n_episodes, embedding_dim).
-        """
-        raise NotImplementedError
+        ...
 
 
 class AvgCLIPEmbed(Embed):
     _base_model: CLIP
 
     def __init__(self, base_model: CLIP):
-        """Generate embeddings for a batch of image chunks
+        """Generate embeddings for a batch of image windows
         by averaging the embeddings of all frames in a given chunk.
         """
+        super().__init__()
         self._base_model = base_model
         size = base_model._model.visual.image_size
         image_size: int = size if isinstance(size, int) else size[0]  # type: ignore
         self.transform = image_transform(image_size)
 
     @torch.inference_mode()
-    def forward(self, frames: torch.Tensor) -> torch.Tensor:
-        if frames.shape[3] != 3:
-            frames = frames.permute(0, 1, 2, 5, 3, 4)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.shape[3] != 3:
+            x = x.permute(0, 1, 2, 5, 3, 4)
         with torch.no_grad(), autocast("cuda", enabled=torch.cuda.is_available()):
-            n_frames, n_chunks, n_episodes, *_ = frames.shape
-            frames = rearrange(frames, "n_f n_ch n_e c h w -> (n_f n_ch n_e) c h w")
+            n_frames, n_windows, n_episodes, *_ = x.shape
+            x = rearrange(x, "n_f n_w n_e c h w -> (n_f n_w n_e) c h w")
             # Embed every frame using CLIP
-            frame_embed = self._base_model._model.encode_image(frames, normalize=True)
-            # Calculate a per-chunk embedding by averaging all frame embeddings of a chunk
-            chunk_embed = reduce(
+            x = self.transform(x)
+            frame_embed = self._base_model._model.encode_image(x, normalize=True)
+            # Calculate a per-window embedding by averaging all frame embeddings in the window
+            window_embed = reduce(
                 frame_embed,
-                "(n_f n_ch n_e) d -> n_ch n_e d",
+                "(n_f n_w n_e) d -> n_w n_e d",
                 reduction="mean",
                 n_f=n_frames,
-                n_ch=n_chunks,
+                n_w=n_windows,
                 n_e=n_episodes,
             )
-        return chunk_embed
+        return window_embed
 
 
 class Reward(nn.Module):
-    @torch.inference_mode()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Compute the reward for a batch of chunks of embeddings.
-
-        Args:
-            x (Tensor): Tensor of shape (n_chunks, n_episodes, channels, height, width).
-
-        Returns:
-            Tensor: Tensor of shape (n_chunks, n_episodes).
-        """
-        raise NotImplementedError
+        ...
 
 
 class ProjectionReward(Reward):
     def __init__(self, baseline, target, direction, projection, alpha):
+        super().__init__()
         self.register_buffer("target", target)
         self.register_buffer("baseline", baseline)
         self.register_buffer("direction", direction)
@@ -187,57 +168,74 @@ class RewardModel(nn.Module):
 
     @torch.inference_mode()
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Compute the reward for a batch of episodes.
+        """Compute the reward for a flat batch of frames.
 
         Args:
-            x (torch.Tensor): Tensor of shape (batch_size, channels, height, width).
+            x (Tensor): Tensor of shape (batch_size, channels, height, width) or (batch_size, height, width, channels).
 
         Returns:
-            torch.Tensor: Tensor of shape (batch_size,).
+            Tensor: Tensor of shape (batch_size,).
         """
         batch_size = x.shape[0]
         n_episodes = x.shape[0] // self.episode_length
-        n_chunks = 1 + (self.episode_length - self.window_size) // self.window_step
+        n_windows = 1 + (self.episode_length - self.window_size) // self.window_step
 
+        print(f"{batch_size=}, {n_episodes=}, {n_windows=}, {self.episode_length=}")
+
+        if x.shape[1] != 3:
+            x = rearrange(x, "b h w c -> b c h w")
+
+        print(f" Before unflatten: {x.shape=}")
+        channels, height, width = x.shape[1:]
+        print(f" ... {channels=}, {height=}, {width=}")
         # Un-flatten the batch into episodes
         x = rearrange(
             x,
-            "(n_steps n_episodes) ... -> n_s n_e ...",
+            "(n_steps n_episodes) ... -> n_steps n_episodes ...",
             n_steps=self.episode_length,
             n_episodes=n_episodes,
         )
+        print(f" After unflatten: {x.shape=}")
 
-        # Unfold the episodes into (potentially overlapping) chunks
-        # -> (n_chunks, n_frames, n_episodes, c, h, w)
+        # Unfold each episode into (potentially overlapping) windows, each containing window_size frames
+        # -> (n_windows, n_episodes, c, h, w, window_size)
         x = x.unfold(0, size=self.window_size, step=self.window_step)
+        print(f" After unfold: {x.shape=}")
 
         # Rearrange the dimensions to match the expected input shape of the embed model
         x = rearrange(
             x,
-            "n_chunks n_frames n_episodes ... -> n_frames n_chunks n_episodes ...",
+            "n_windows n_episodes ... n_frames -> n_frames n_windows n_episodes ...",
             n_frames=self.window_size,
-            n_chunks=n_chunks,
+            n_windows=n_windows,
             n_episodes=n_episodes,
         )
+        print(f" After rearrange: {x.shape=}")
 
-        # Embed the chunks -> (n_chunks, n_episodes, embedding_dim)
+        # Embed the windows
+        # (n_frames, n_windows, n_episodes, c, h, w) -> (n_windows, n_episodes, embedding_dim)
         x = self.embed(x)
+        print(f" After embed: {x.shape=}")
 
-        # Compute the reward for each chunk -> (n_chunks, n_episodes)
+        # Compute the reward for each window
+        # (n_windows, n_episodes, embedding_dim) -> (n_windows, n_episodes)
         chunk_rewards = self.reward(x)
+        print(f" After reward: {chunk_rewards.shape=}")
 
         # Assign the reward of each chunk to its last frame
-        flat_rewards = rearrange(chunk_rewards, "n_ch n_e -> (n_ch n_e)")
+        flat_rewards = rearrange(chunk_rewards, "n_w n_e -> (n_w n_e)")
+        print(f" After rewards flatten: {flat_rewards.shape=}")
 
-        # TODO: Check what the dimension needs to be
         rewards = torch.zeros(batch_size, device=x.device)
+        print(f" Before indices: {rewards.shape=}")
 
-        # Calculate the end indices for each chunk
+        # Calculate the end indices for each window
         indices = (
-            torch.arange(n_chunks * n_episodes, device=x.device) * self.window_step
+            torch.arange(n_windows * n_episodes, device=x.device) * self.window_step
             + self.window_size
             - 1
         )
+        print(f" Indices: {indices.shape=}")
 
         assert len(indices) == len(flat_rewards)
 
@@ -260,8 +258,8 @@ def compute_rewards(
     Args:
         model (CLIPReward): reward model
         frames (torch.Tensor): frames to compute rewards for
-        batch_size (int): frames will be split into batch_size sized chunks
-        num_workers (int): each batch will be split into num_workers chunks
+        batch_size (int): frames will be split into batch_size sized windows
+        num_workers (int): each batch will be split into num_workers windows
         worker_frames_tensor (Optional[torch.Tensor], optional): no idea what these do, maybe for logging?. Defaults to None.
 
     Returns:
@@ -275,19 +273,16 @@ def compute_rewards(
     with torch.no_grad():
         for i in range(0, n_samples, batch_size):
             frames_batch = frames[i : i + batch_size]
-            render_dim = tuple(frames_batch.shape[1:])
-            assert len(render_dim) == 3
             rewards_batch = dist_worker_compute_reward(
                 rank=0,
                 reward_model=model,
-                render_dim=render_dim,
+                render_dim=frames_batch.shape[1:],  # type: ignore
                 batch_size=batch_size // num_workers,
                 num_workers=num_workers,
                 frames=frames_batch,
                 worker_frames_tensor=worker_frames_tensor,
             )
-            assert rewards_batch is not None
-            rewards_batch = rewards_batch.cpu()
+            rewards_batch = rewards_batch.cpu()  # type: ignore
             rewards[i : i + batch_size] = rewards_batch
     return rewards
 
@@ -328,6 +323,8 @@ def dist_worker_compute_reward(
     dist.scatter(worker_frames, scatter_list=scatter_list, src=0)
 
     with torch.no_grad():
+        # worker_frames :: (batch_size, channels, height, width)
+        # rewards :: (batch_size,)
         rewards = reward_model(worker_frames)
 
     def zero_t():
