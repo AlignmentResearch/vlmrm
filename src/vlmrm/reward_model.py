@@ -11,6 +11,38 @@ from vlmrm.contrib.open_clip.transform import image_transform
 from vlmrm.trainer.config import CLIPRewardConfig
 
 
+class BaseModel(nn.Module):
+    def embed_text(self, x) -> torch.Tensor:
+        raise NotImplementedError
+
+    def embed_image(self, x: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
+
+
+class CLIP(BaseModel):
+    _model: open_clip.model.CLIP
+
+    def __init__(self, model_name: str, pretrained: str, cache_dir: str):
+        super().__init__()
+        self._model = open_clip.create_model(
+            model_name=model_name,
+            pretrained=pretrained,
+            cache_dir=cache_dir,
+        )  # type: ignore
+
+    @torch.inference_mode()
+    def embed_text(self, x: List[str]) -> torch.Tensor:
+        tokens = open_clip.tokenize(x)
+        encoded = self._model.encode_text(tokens).float()
+        encoded = encoded / encoded.norm(dim=-1, keepdim=True)
+        return encoded
+
+    @torch.inference_mode()
+    def embed_image(self, x: torch.Tensor) -> torch.Tensor:
+        encoded = self._model.encode_image(x, normalize=True)
+        return encoded
+
+
 class Embed(nn.Module):
     def __init__(self, embed_model):
         super().__init__()
@@ -29,15 +61,15 @@ class Embed(nn.Module):
         raise NotImplementedError
 
 
-class AvgFrameEmbed(Embed):
-    embed_model: open_clip.model.CLIP
+class AvgCLIPEmbed(Embed):
+    _base_model: CLIP
 
-    def __init__(self, clip_model: open_clip.model.CLIP):
+    def __init__(self, base_model: CLIP):
         """Generate embeddings for a batch of image chunks
         by averaging the embeddings of all frames in a given chunk.
         """
-        self.embed_model = clip_model
-        size = clip_model.visual.image_size
+        self._base_model = base_model
+        size = base_model._model.visual.image_size
         image_size: int = size if isinstance(size, int) else size[0]  # type: ignore
         self.transform = image_transform(image_size)
 
@@ -49,7 +81,7 @@ class AvgFrameEmbed(Embed):
             n_frames, n_chunks, n_episodes, *_ = frames.shape
             frames = rearrange(frames, "n_f n_ch n_e c h w -> (n_f n_ch n_e) c h w")
             # Embed every frame using CLIP
-            frame_embed = self.embed_model.encode_image(frames, normalize=True)
+            frame_embed = self._base_model._model.encode_image(frames, normalize=True)
             # Calculate a per-chunk embedding by averaging all frame embeddings of a chunk
             chunk_embed = reduce(
                 frame_embed,
@@ -91,17 +123,14 @@ class ProjectionReward(Reward):
         return y
 
     @staticmethod
-    def from_clip(target_prompts, baseline_prompts, clip, alpha):
-        # TODO: Make this work with general tokenizers and encoders
-        # ...probably by splitting both into a separate class
-        target_prompts = ProjectionReward._tokenize_prompts(target_prompts)
-        baseline_prompts = ProjectionReward._tokenize_prompts(baseline_prompts)
-        target = ProjectionReward._embed_prompts(clip, target_prompts).mean(
-            dim=0, keepdim=True
-        )
-        baseline = ProjectionReward._embed_prompts(clip, baseline_prompts).mean(
-            dim=0, keepdim=True
-        )
+    def from_embed(
+        target_prompts: list[str],
+        baseline_prompts: list[str],
+        embed_base: BaseModel,
+        alpha: float,
+    ) -> "ProjectionReward":
+        target = embed_base.embed_text(target_prompts).mean(dim=0, keepdim=True)
+        baseline = embed_base.embed_text(baseline_prompts).mean(dim=0, keepdim=True)
         direction = target - baseline
         projection = ProjectionReward._compute_projection(direction, alpha)
 
@@ -114,19 +143,6 @@ class ProjectionReward(Reward):
         projection = alpha * projection + (1 - alpha) * identity
         return projection
 
-    @staticmethod
-    def _tokenize_prompts(x: List[str]) -> torch.Tensor:
-        """Tokenize a list of prompts."""
-        return open_clip.tokenize(x)
-
-    @staticmethod
-    def _embed_prompts(embed_model, x) -> torch.Tensor:
-        """Embed a list of prompts."""
-        with torch.no_grad():
-            x = embed_model.encode_text(x).float()
-        x = x / x.norm(dim=-1, keepdim=True)
-        return x
-
 
 class RewardModel(nn.Module):
     def __init__(
@@ -134,7 +150,7 @@ class RewardModel(nn.Module):
         embed: Embed,
         reward: Reward,
         window_size: int,
-        stride: int,
+        window_step: int,
         episode_length: int,
     ) -> None:
         super().__init__()
@@ -143,28 +159,30 @@ class RewardModel(nn.Module):
 
         self.episode_length = episode_length
         self.window_size = window_size
-        self.stride = stride
+        self.window_step = window_step
 
     @staticmethod
-    def from_config(config: CLIPRewardConfig) -> "RewardModel":
+    def from_config(config: CLIPRewardConfig, episode_length: int) -> "RewardModel":
         model_name_prefix, pretrained = config.pretrained_model.split("/")
-        model = open_clip.create_model(
-            model_name=model_name_prefix,
-            pretrained=pretrained,
-            cache_dir=config.cache_dir,
-        )
-        reward = ProjectionReward.from_clip(
-            target_prompts=config.target_prompts,
-            baseline_prompts=config.baseline_prompts,
-            clip=model,
-            alpha=config.alpha,
-        )
-        embed = AvgFrameEmbed(model)
+        base_model = CLIP(model_name_prefix, pretrained, config.cache_dir)
 
-        assert config.stride == config.window_size
+        if config.embed_type == "avg_frame":
+            embed = AvgCLIPEmbed(base_model)
+        else:
+            raise ValueError(f"Unknown embed_type: {config.embed_type}")
+
+        if config.reward_type == "projection":
+            reward = ProjectionReward.from_embed(
+                target_prompts=config.target_prompts,
+                baseline_prompts=config.baseline_prompts,
+                embed_base=base_model,
+                alpha=config.alpha,
+            )
+        else:
+            raise ValueError(f"Unknown reward_type: {config.reward_type}")
 
         return RewardModel(
-            embed, reward, config.window_size, config.stride, config.episode_length
+            embed, reward, config.window_size, config.window_step, episode_length
         )
 
     @torch.inference_mode()
@@ -179,40 +197,54 @@ class RewardModel(nn.Module):
         """
         batch_size = x.shape[0]
         n_episodes = x.shape[0] // self.episode_length
-        # TODO: This assumes the chunks are not overlapping
-        n_chunks = self.episode_length // self.window_size
-        n_frames = self.window_size
+        n_chunks = 1 + (self.episode_length - self.window_size) // self.window_step
 
+        # Un-flatten the batch into episodes
         x = rearrange(
             x,
-            "(n_f n_ch n_e) ... -> n_f n_ch n_e ...",
-            n_f=n_frames,
-            n_ch=n_chunks,
-            n_e=n_episodes,
+            "(n_steps n_episodes) ... -> n_s n_e ...",
+            n_steps=self.episode_length,
+            n_episodes=n_episodes,
         )
 
+        # Unfold the episodes into (potentially overlapping) chunks
+        # -> (n_chunks, n_frames, n_episodes, c, h, w)
+        x = x.unfold(0, size=self.window_size, step=self.window_step)
+
+        # Rearrange the dimensions to match the expected input shape of the embed model
+        x = rearrange(
+            x,
+            "n_chunks n_frames n_episodes ... -> n_frames n_chunks n_episodes ...",
+            n_frames=self.window_size,
+            n_chunks=n_chunks,
+            n_episodes=n_episodes,
+        )
+
+        # Embed the chunks -> (n_chunks, n_episodes, embedding_dim)
         x = self.embed(x)
-        # We get a tensor of (n_chunks, n_episodes) rewards
+
+        # Compute the reward for each chunk -> (n_chunks, n_episodes)
         chunk_rewards = self.reward(x)
 
-        # We want to return a tensor of (n_frames * n_chunks * n_episodes) rewards
+        # Assign the reward of each chunk to its last frame
+        flat_rewards = rearrange(chunk_rewards, "n_ch n_e -> (n_ch n_e)")
+
+        # TODO: Check what the dimension needs to be
         rewards = torch.zeros(batch_size, device=x.device)
 
-        # TODO: Fix the following
-        # Create an index tensor
-        indices = torch.arange(n_chunks * n_frames, device=x.device).view(-1, n_frames)[
-            :, -1
-        ]
+        # Calculate the end indices for each chunk
         indices = (
-            indices.repeat(n_episodes, 1).view(-1)
-            + torch.arange(n_episodes, device=x.device).view(-1, 1)
-            * n_chunks
-            * n_frames
+            torch.arange(n_chunks * n_episodes, device=x.device) * self.window_step
+            + self.window_size
+            - 1
         )
-        # Assign the chunk rewards to the frames corresponding to the last frame of each chunk
-        rewards[indices] = chunk_rewards.t().contiguous().view(-1)
 
-        return x
+        assert len(indices) == len(flat_rewards)
+
+        # Assign chunk rewards to the last frame of each chunk
+        rewards[indices] = flat_rewards
+
+        return rewards
 
 
 def compute_rewards(

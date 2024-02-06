@@ -135,6 +135,24 @@ class Config(BaseModel):
                     f"divisible by ({self.reward.batch_size=}) so that all batches"
                     "are of the same size."
                 )
+            if (
+                self.reward.window_size > self.rl.episode_length
+                or self.reward.window_size < 1
+            ):
+                raise ValueError(
+                    f"({self.reward.window_size=}) must be between 1 and "
+                    f"({self.rl.episode_length=})"
+                )
+            if self.reward.window_step < 1:
+                raise ValueError(f"({self.reward.window_step=}) must be greater than 1")
+
+            if (
+                self.rl.episode_length - self.reward.window_size
+            ) % self.reward.window_step != 0:
+                raise ValueError(
+                    f"({self.rl.episode_length=}) - ({self.reward.window_size=}) must be "
+                    f"divisible by ({self.reward.window_step=})"
+                )
         else:
             if self.logging.tensorboard_freq is None:
                 raise ValueError(
@@ -159,6 +177,12 @@ class CLIPRewardConfig(BaseModel):
     cache_dir: str
     camera_config: Optional[Dict[str, Any]] = None
     textured: bool = True
+
+    # Added on top of VLMRM
+    embed_type: Literal["avg_frame"]
+    reward_type: Literal["projection"]
+    window_size: int
+    window_step: int
 
     @computed_field
     @property

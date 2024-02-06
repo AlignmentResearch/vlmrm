@@ -14,7 +14,7 @@ reward:
   # so that it can be shared among workers, and must be a divisor
   # of n_envs * episode_length so that all batches can be of the
   # same size (no support for variable batch size as of now.)
-  batch_size: 800
+  batch_size: 200
   alpha: 0.5 # Alpha value of Baseline CLIP (CO-RELATE)
   target_prompts: # Description of the goal state
     - a car at the peak of the mountain, next to the yellow flag
@@ -27,15 +27,15 @@ reward:
 rl:
   policy_name: MlpPolicy
   n_steps: 3000000 # Total number of simulation steps to be collected.
-  n_envs_per_worker: 32 # Number of environments per worker (GPU)
+  n_envs_per_worker: 1 # Number of environments per worker (GPU)
   episode_length: 200 # Desired episode length
-  learning_starts: 75000 # Number of env steps to collect before training
-  train_freq: 1 # Number of collected env steps between training iterations
+  learning_starts: 100 # Number of env steps to collect before training
+  train_freq: 200 # Number of collected env steps between training iterations
   batch_size: 256 # SAC buffer sample size per gradient step
-  gradient_steps: 1 # Number of samples to collect from the buffer per training step
+  gradient_steps: 400 # Number of samples to collect from the buffer per training step
   tau: 0.01 # SAC target network update rate
   gamma: 0.9999 # SAC discount factor
-  ent_coef: 0.1 # SAC entropy coefficient
+  ent_coef: "auto" # SAC entropy coefficient
   learning_rate: 0.0001 # SAC optimizer learning rate
   policy_kwargs: # Policy-specific arguments
     net_arch:

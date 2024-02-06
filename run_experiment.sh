@@ -2,7 +2,7 @@
 
 #SBATCH --nodes=1
 #SBATCH --gpus=1
-#SBATCH --time=08:00:00
+#SBATCH --time=16:00:00
 #SBATCH --partition=single
 #SBATCH --job-name=vlmrm
 #SBATCH --output=logs/job_%j.log

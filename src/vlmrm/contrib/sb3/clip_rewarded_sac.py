@@ -17,7 +17,7 @@ from stable_baselines3.common.utils import check_for_correct_spaces, safe_mean
 from stable_baselines3.common.vec_env import VecEnv
 from stable_baselines3.common.vec_env.patch_gym import _convert_space
 from vlmrm.contrib.sb3.clip_buffer import CLIPReplayBuffer
-from vlmrm.reward_model import compute_rewards, load_reward_model_from_config
+from vlmrm.reward_model import RewardModel, compute_rewards
 from vlmrm.trainer.config import CLIPRewardConfig, Config
 
 SelfCLIPRewardedSAC = TypeVar("SelfCLIPRewardedSAC", bound="CLIPRewardedSAC")
@@ -41,8 +41,8 @@ class CLIPRewardedSAC(SAC):
         ) * env.num_envs
 
         if config.rl.action_noise:
-            mean = config.rl.action_noise.mean * np.ones(env.action_space.shape)
-            sigma = config.rl.action_noise.sigma * np.ones(env.action_space.shape)
+            mean = config.rl.action_noise.mean * np.ones(env.action_space.shape)  # type: ignore
+            sigma = config.rl.action_noise.sigma * np.ones(env.action_space.shape)  # type: ignore
             if config.rl.action_noise.name == "NormalActionNoise":
                 action_noise = sb3_noise.NormalActionNoise(mean=mean, sigma=sigma)
             elif config.rl.action_noise.name == "OrnsteinUhlenbeckActionNoise":
@@ -90,6 +90,7 @@ class CLIPRewardedSAC(SAC):
             self._load_modules()
             self.previous_num_timesteps = 0
             self.previous_num_episodes = 0
+            assert isinstance(config.reward, CLIPRewardConfig)
             self.worker_frames_tensor = torch.zeros(
                 (config.reward.batch_size // config.rl.n_workers, *config.render_dim),
                 dtype=torch.uint8,
@@ -100,7 +101,9 @@ class CLIPRewardedSAC(SAC):
 
     def _load_modules(self):
         assert isinstance(self.config.reward, CLIPRewardConfig)
-        reward_model = load_reward_model_from_config(self.config.reward).to(self.device)
+        reward_model = RewardModel.from_config(
+            self.config.reward, episode_length=self.config.rl.episode_length
+        ).to(self.device)
         self.reward_model = reward_model
 
     def _compute_clip_rewards(self) -> None:
@@ -124,6 +127,7 @@ class CLIPRewardedSAC(SAC):
         frames = torch.from_numpy(np.array(self.replay_buffer.render_arrays))
         frames = rearrange(frames, "n_steps n_envs ... -> (n_steps n_envs) ...")
         assert frames.shape[1:] == self.config.render_dim
+        assert isinstance(self.config.reward, CLIPRewardConfig)
         rewards = compute_rewards(
             model=self.reward_model,
             frames=frames,
@@ -161,7 +165,7 @@ class CLIPRewardedSAC(SAC):
                 ),
                 axis=1,
             )
-            self.ep_clip_info_buffer.extend([rewards_per_episode.tolist()])
+            self.ep_clip_info_buffer.extend([rewards_per_episode.tolist()])  # type: ignore
 
     def collect_rollouts(self, *args, **kwargs) -> RolloutReturn:
         rollout = super().collect_rollouts(*args, **kwargs)
