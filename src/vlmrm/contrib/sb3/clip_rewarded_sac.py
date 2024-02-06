@@ -119,6 +119,8 @@ class CLIPRewardedSAC(SAC):
         env_episodes = total_episodes // self.env.num_envs
         assert self.config.rl.episode_length == env_episode_timesteps // env_episodes
 
+        # These contain only the frames that were rendered during the last few episodes
+        # i.e. the ones that we need to compute rewards for
         frames = torch.from_numpy(np.array(self.replay_buffer.render_arrays))
         frames = rearrange(frames, "n_steps n_envs ... -> (n_steps n_envs) ...")
         assert frames.shape[1:] == self.config.render_dim
