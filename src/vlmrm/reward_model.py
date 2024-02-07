@@ -180,14 +180,9 @@ class RewardModel(nn.Module):
         n_episodes = x.shape[0] // self.episode_length
         n_windows = 1 + (self.episode_length - self.window_size) // self.window_step
 
-        print(f"{batch_size=}, {n_episodes=}, {n_windows=}, {self.episode_length=}")
-
         if x.shape[1] != 3:
             x = rearrange(x, "b h w c -> b c h w")
 
-        print(f" Before unflatten: {x.shape=}")
-        channels, height, width = x.shape[1:]
-        print(f" ... {channels=}, {height=}, {width=}")
         # Un-flatten the batch into episodes
         x = rearrange(
             x,
@@ -195,12 +190,10 @@ class RewardModel(nn.Module):
             n_steps=self.episode_length,
             n_episodes=n_episodes,
         )
-        print(f" After unflatten: {x.shape=}")
 
         # Unfold each episode into (potentially overlapping) windows, each containing window_size frames
         # -> (n_windows, n_episodes, c, h, w, window_size)
         x = x.unfold(0, size=self.window_size, step=self.window_step)
-        print(f" After unfold: {x.shape=}")
 
         # Rearrange the dimensions to match the expected input shape of the embed model
         x = rearrange(
@@ -210,24 +203,19 @@ class RewardModel(nn.Module):
             n_windows=n_windows,
             n_episodes=n_episodes,
         )
-        print(f" After rearrange: {x.shape=}")
 
         # Embed the windows
         # (n_frames, n_windows, n_episodes, c, h, w) -> (n_windows, n_episodes, embedding_dim)
         x = self.embed(x)
-        print(f" After embed: {x.shape=}")
 
         # Compute the reward for each window
         # (n_windows, n_episodes, embedding_dim) -> (n_windows, n_episodes)
         chunk_rewards = self.reward(x)
-        print(f" After reward: {chunk_rewards.shape=}")
 
         # Assign the reward of each chunk to its last frame
         flat_rewards = rearrange(chunk_rewards, "n_w n_e -> (n_w n_e)")
-        print(f" After rewards flatten: {flat_rewards.shape=}")
 
         rewards = torch.zeros(batch_size, device=x.device)
-        print(f" Before indices: {rewards.shape=}")
 
         # Calculate the end indices for each window
         indices = (
@@ -235,7 +223,6 @@ class RewardModel(nn.Module):
             + self.window_size
             - 1
         )
-        print(f" Indices: {indices.shape=}")
 
         assert len(indices) == len(flat_rewards)
 
