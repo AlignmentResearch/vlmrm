@@ -1,28 +1,19 @@
-env_name: MountainCarContinuous-v0 # RL environment name
-base_path: data/runs/training # Base path to save logs and checkpoints
-seed: 42 # Seed for reproducibility
-description: Mountain Car training using CLIP reward
-tags: # Wandb tags
-  - training
-  - mc
-  - CLIP
+env_name: MountainCarContinuous-v0
+base_path: data/runs/training
+seed: 91
+description: Mountain car continuous
+tags:
+  - mountain car
+  - clip
 reward:
   name: clip
-  pretrained_model: ViT-g-14/laion2b_s34b_b88k # CLIP model name
-  # CLIP batch size per synchronous inference step.
-  # Batch size must be divisible by n_workers (GPU count)
-  # so that it can be shared among workers, and must be a divisor
-  # of n_envs * episode_length so that all batches can be of the
-  # same size (no support for variable batch size as of now.)
-  batch_size: 200
-  alpha: 0.5 # Alpha value of Baseline CLIP (CO-RELATE)
-  target_prompts: # Description of the goal state
-    - a car at the peak of the mountain, next to the yellow flag
-  baseline_prompts: # Description of the environment
-    - a car in the mountain
-  # Path to pre-saved model weights. When executing multiple runs,
-  # mount a volume to this path to avoid downloading the model
-  # weights multiple times.
+  pretrained_model: ViT-bigG-14/laion2b_s39b_b160k
+  batch_size: 1600
+  alpha: 0.8
+  target_prompts:
+    - a red car at the mountain peak next to the yellow flag
+  baseline_prompts:
+    - a red car at the bottom of the valley
   cache_dir: .cache
   # Stuff below added on top of VLMRM
   embed_type: "avg_frame"
@@ -31,22 +22,23 @@ reward:
   window_step: 1
 rl:
   policy_name: MlpPolicy
-  n_steps: 3000000 # Total number of simulation steps to be collected.
-  n_envs_per_worker: 1 # Number of environments per worker (GPU)
-  episode_length: 200 # Desired episode length
-  learning_starts: 75000 # Number of env steps to collect before training
-  train_freq: 200 # Number of collected env steps between training iterations
-  batch_size: 256 # SAC buffer sample size per gradient step
-  gradient_steps: 400 # Number of samples to collect from the buffer per training step
-  tau: 0.01 # SAC target network update rate
-  gamma: 0.9999 # SAC discount factor
-  ent_coef: "auto" # SAC entropy coefficient
-  learning_rate: 0.0001 # SAC optimizer learning rate
-  policy_kwargs: # Policy-specific arguments
+  n_steps: 3000000
+  n_envs_per_worker: 8
+  episode_length: 200
+  learning_starts: 600
+  train_freq: 200
+  batch_size: 512
+  gradient_steps: 200
+  tau: 0.01
+  gamma: 0.9999
+  learning_rate: 3e-4
+  ent_coef: 0.1
+  use_sde: true
+  policy_kwargs:
+    log_std_init: -3.67
     net_arch:
       - 64
       - 64
 logging:
-  checkpoint_freq: 64000 # Number of env steps between checkpoints
-  video_freq: 800 # Number of env steps between videos
-  # tensorboard_freq: 800 # Number of env steps between tensorboard logs
+  checkpoint_freq: 128000
+  video_freq: 64000

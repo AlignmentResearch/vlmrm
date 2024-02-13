@@ -34,8 +34,10 @@ class CLIPRewardedSAC(SAC):
         inference_only: bool = False,
     ):
         self.config = config
+        # This means that the larger rl.learning_starts is, the smoother the reward
+        # averages become, since the window size is larger
         stats_window_size = (
-            (config.rl.learning_starts + config.rl.train_freq * env.num_envs)
+            (config.rl.train_freq * env.num_envs)
             // config.rl.episode_length
             // env.num_envs
         ) * env.num_envs
@@ -113,18 +115,22 @@ class CLIPRewardedSAC(SAC):
         assert ep_info_buffer_maxlen is not None
 
         replay_buffer_pos = self.replay_buffer.pos
-        # Number of steps we have done since last reward computation
+        # Number of steps we have done since last reward computation, across all envs
         total_timesteps = self.num_timesteps - self.previous_num_timesteps
-        # We presume that we have done the same number of steps in each environment
+        # Number of steps we have done in each environment
         env_episode_timesteps = total_timesteps // self.env.num_envs
         total_episodes = self._episode_num - self.previous_num_episodes
         # Number of episodes we have done in each environment
         env_episodes = total_episodes // self.env.num_envs
+
+        # Assert that in each environment, we have done a whole number of episodes
         assert self.config.rl.episode_length == env_episode_timesteps // env_episodes
 
         # These contain only the frames that were rendered during the last few episodes
         # i.e. the ones that we need to compute rewards for
         frames = torch.from_numpy(np.array(self.replay_buffer.render_arrays))
+
+        # Rewards seem to be saved in a buffer sequentially for all environments
         frames = rearrange(frames, "n_steps n_envs ... -> (n_steps n_envs) ...")
         assert frames.shape[1:] == self.config.render_dim
         assert isinstance(self.config.reward, CLIPRewardConfig)
