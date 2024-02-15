@@ -274,8 +274,6 @@ class RewardModel(nn.Module):
         n_episodes = x.shape[0] // self.episode_length
         n_windows = 1 + (self.episode_length - self.window_size) // self.window_step
 
-        logger.debug(f"{x.shape=}, n_episodes: {n_episodes}, n_windows: {n_windows}")
-
         if x.shape[1] != 3:
             x = rearrange(x, "b h w c -> b c h w")
 
