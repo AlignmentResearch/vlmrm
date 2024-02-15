@@ -7,6 +7,7 @@ from gymnasium.envs.classic_control.continuous_mountain_car import (
     Continuous_MountainCarEnv as GymContinuousMountainCarEnv,
 )
 from gymnasium.error import DependencyNotInstalled
+from loguru import logger
 from numpy.typing import NDArray
 
 
@@ -16,6 +17,7 @@ class CLIPRewardedContinuousMountainCarEnv(GymContinuousMountainCarEnv):
         *,
         episode_length: int,
         render_mode: str = "rgb_array",
+        is_render: bool = False,
     ) -> None:
         super().__init__(render_mode)
         self.episode_length = episode_length
@@ -23,6 +25,8 @@ class CLIPRewardedContinuousMountainCarEnv(GymContinuousMountainCarEnv):
         self.success = False
         self.background_img = None
         self.car_img = None
+        self.num_resets = 0
+        self.is_render = is_render
 
     def step(self, action) -> Tuple[NDArray, float, bool, bool, Dict]:
         _, reward, _, truncated, info = super().step(action)
@@ -36,6 +40,9 @@ class CLIPRewardedContinuousMountainCarEnv(GymContinuousMountainCarEnv):
         self.num_steps += 1
         terminated = self.num_steps >= self.episode_length
         info["success"] = self.success
+
+        # logger.info(f"[STEP] step: {self.num_steps}, x: {x}")
+
         return (
             np.array(self.state, dtype=np.float32),  # obs
             reward,
@@ -45,10 +52,21 @@ class CLIPRewardedContinuousMountainCarEnv(GymContinuousMountainCarEnv):
         )
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict] = None):
+        # logger.info(
+        #     f"[RESET] is_render: {self.is_render} after: {self.num_resets}, steps done: {self.num_steps}, new position: {seed}"
+        # )
+        # TODO: Remove
+        if self.is_render:
+            seed: float = np.linspace(-1.2, 0.5, 170)[(self.num_resets // 2) % 170]
+        else:
+            seed: float = np.linspace(-1.2, 0.5, 170)[self.num_resets % 170]
+        self.num_resets += 1
+
         self.num_steps = 0
         return super().reset(seed=seed, options=options)
 
     def render(self):
+        # logger.info(f"[RENDER] step: {self.num_steps}, x: {self.state[0]}")
         assert self.render_mode == "rgb_array"
         try:
             import pygame

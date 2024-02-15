@@ -109,7 +109,9 @@ class Config(BaseModel):
                     "When doing CLIP-rewarded training, a tensorboard logging "
                     "frequency does not need to be specified."
                 )
-            if len(self.reward.target_prompts) != len(self.reward.baseline_prompts):
+            if self.reward.reward_type != "logit" and len(
+                self.reward.target_prompts
+            ) != len(self.reward.baseline_prompts):
                 raise ValueError(
                     f"({self.reward.target_prompts=}) and "
                     f"({self.reward.baseline_prompts=}) must have the same length."
@@ -153,6 +155,12 @@ class Config(BaseModel):
                     f"({self.rl.episode_length=}) - ({self.reward.window_size=}) must be "
                     f"divisible by ({self.reward.window_step=})"
                 )
+            if (self.reward.embed_type == "viclip") and (
+                self.reward.frames_per_video is None
+            ):
+                raise ValueError(
+                    "You must specify the number of frames per video when using ViCLIP."
+                )
         else:
             if self.logging.tensorboard_freq is None:
                 raise ValueError(
@@ -179,10 +187,11 @@ class CLIPRewardConfig(BaseModel):
     textured: bool = True
 
     # Added on top of VLMRM
-    embed_type: Literal["avg_frame"]
-    reward_type: Literal["projection"]
+    embed_type: Literal["avg_frame", "viclip"]
+    reward_type: Literal["projection", "logit"]
     window_size: int
     window_step: int
+    frames_per_video: Optional[int] = None
 
     @computed_field
     @property

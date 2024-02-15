@@ -193,7 +193,7 @@ def init_process(
     config_dump: Dict[str, Any],
 ) -> None:
     os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = "29502"
+    # os.environ["MASTER_PORT"] = "29502"
     # if backend == "nccl":
     # TODO: come back to this after fixing the kube setup
     # os.environ["NCCL_SHM_DISABLE"] = "1"

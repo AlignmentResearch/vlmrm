@@ -1,16 +1,14 @@
 from typing import Optional, Tuple
 
 import torch
-
+from open_clip.constants import OPENAI_DATASET_MEAN, OPENAI_DATASET_STD
 from torchvision.transforms import (
-    Normalize,
+    CenterCrop,
     Compose,
     InterpolationMode,
+    Normalize,
     Resize,
-    CenterCrop,
 )
-
-from open_clip.constants import OPENAI_DATASET_MEAN, OPENAI_DATASET_STD
 
 
 def image_transform(
@@ -47,3 +45,7 @@ def image_transform(
             normalize,
         ]
     )
+
+
+VICLIP_MEAN = (0.485, 0.456, 0.406)
+VICLIP_STD = (0.229, 0.224, 0.225)

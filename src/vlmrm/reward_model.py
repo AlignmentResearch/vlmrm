@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import List, Optional, Protocol, Tuple
 
 import open_clip
@@ -5,9 +6,11 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from einops import rearrange, reduce
+from loguru import logger
 from torch.amp.autocast_mode import autocast
 
-from vlmrm.contrib.open_clip.transform import image_transform
+from vlmrm.contrib.open_clip.transform import VICLIP_MEAN, VICLIP_STD, image_transform
+from vlmrm.contrib.viclip import get_viclip
 from vlmrm.trainer.config import CLIPRewardConfig
 
 
@@ -15,16 +18,11 @@ class BaseModel(Protocol):
     def embed_text(self, x) -> torch.Tensor:
         ...
 
-    def embed_image(self, x: torch.Tensor) -> torch.Tensor:
-        ...
-
 
 class CLIP(nn.Module):
-    _model: open_clip.model.CLIP
-
     def __init__(self, model_name: str, pretrained: str, cache_dir: str):
         super().__init__()
-        self._model = open_clip.create_model(
+        self._model: open_clip.model.CLIP = open_clip.create_model(
             model_name=model_name,
             pretrained=pretrained,
             cache_dir=cache_dir,
@@ -35,6 +33,7 @@ class CLIP(nn.Module):
         tokens = open_clip.tokenize(x)
         encoded = self._model.encode_text(tokens).float()
         encoded = encoded / encoded.norm(dim=-1, keepdim=True)
+        print(f"{encoded.shape=}")
         return encoded
 
     @torch.inference_mode()
@@ -43,9 +42,69 @@ class CLIP(nn.Module):
         return encoded
 
 
+class ViCLIP(nn.Module):
+    def __init__(self, cache_dir: str, frames_per_video: int) -> None:
+        super().__init__()
+        model_name = "ViCLIP-L_InternVid-FLT-10M.pth"
+        path = Path(cache_dir) / model_name
+        self._model, self._tokenizer = get_viclip(
+            "l", path.absolute().as_posix(), frames_per_video=frames_per_video
+        )
+
+    @torch.inference_mode()
+    def embed_text(self, x: List[str]) -> torch.Tensor:
+        result = [self._model.get_text_features(t, self._tokenizer) for t in x]
+        result = torch.cat(result)
+        return result
+
+
 class Embed(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         ...
+
+
+class ViCLIPEmbed(Embed):
+    _base_model: ViCLIP
+
+    def __init__(self, base_model: ViCLIP) -> None:
+        super().__init__()
+        self._base_model = base_model
+        size = base_model._model.inputs_image_res
+        self.transform = image_transform(size, mean=VICLIP_MEAN, std=VICLIP_STD)
+        # This is a preset number in the model (8)
+        self.expected_n_frames = base_model._model.video_input_num_frames
+
+    @torch.inference_mode()
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.shape[3] != 3:
+            x = x.permute(0, 1, 2, 5, 3, 4)
+        with torch.no_grad(), autocast("cuda", enabled=torch.cuda.is_available()):
+            n_frames, n_windows, n_episodes, *_ = x.shape
+
+            assert n_frames >= self.expected_n_frames
+
+            # Take only n_frames frames, evenly spaced
+            step = n_frames // self.expected_n_frames
+            x = x[::step, ...][: self.expected_n_frames, ...]
+
+            x = rearrange(x, "n_f n_w n_e c h w -> (n_f n_w n_e) c h w")
+            x = self.transform(x)
+            x = rearrange(
+                x,
+                "(n_f n_w n_e) c h w -> (n_w n_e) n_f c h w",
+                n_f=self.expected_n_frames,
+                n_w=n_windows,
+                n_e=n_episodes,
+            )
+
+            # The episodes are the different samples in a batch
+            # The window, i.e. the frames, are the one video
+            window_embed = self._base_model._model.get_vid_features(x)
+            window_embed = rearrange(
+                window_embed, "(n_w n_e) d -> n_w n_e d", n_w=n_windows, n_e=n_episodes
+            )
+
+        return window_embed
 
 
 class AvgCLIPEmbed(Embed):
@@ -125,6 +184,29 @@ class ProjectionReward(Reward):
         return projection
 
 
+class LogitReward(Reward):
+    def __init__(self, baselines, target):
+        super().__init__()
+        self.register_buffer("options", torch.cat([target, baselines]))
+
+    @torch.inference_mode()
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        self.options = self.options.to(x.device)
+        y = (x @ self.options.T).softmax(dim=-1)[:, 0]
+        return y
+
+    @staticmethod
+    def from_embed(
+        target_prompts: list[str],
+        baseline_prompts: list[str],
+        embed_base: BaseModel,
+    ) -> "LogitReward":
+        target = embed_base.embed_text(target_prompts).mean(dim=0, keepdim=True)
+        baselines = embed_base.embed_text(baseline_prompts)
+
+        return LogitReward(baselines, target)
+
+
 class RewardModel(nn.Module):
     def __init__(
         self,
@@ -144,11 +226,17 @@ class RewardModel(nn.Module):
 
     @staticmethod
     def from_config(config: CLIPRewardConfig, episode_length: int) -> "RewardModel":
-        model_name_prefix, pretrained = config.pretrained_model.split("/")
-        base_model = CLIP(model_name_prefix, pretrained, config.cache_dir)
-
         if config.embed_type == "avg_frame":
+            # TODO These fields are required by the config although they are not used sometimes
+            model_name_prefix, pretrained = config.pretrained_model.split("/")
+            base_model = CLIP(model_name_prefix, pretrained, config.cache_dir)
             embed = AvgCLIPEmbed(base_model)
+        elif config.embed_type == "viclip":
+            assert config.frames_per_video is not None
+            base_model = ViCLIP(
+                config.cache_dir, frames_per_video=config.frames_per_video
+            )
+            embed = ViCLIPEmbed(base_model)
         else:
             raise ValueError(f"Unknown embed_type: {config.embed_type}")
 
@@ -158,6 +246,12 @@ class RewardModel(nn.Module):
                 baseline_prompts=config.baseline_prompts,
                 embed_base=base_model,
                 alpha=config.alpha,
+            )
+        elif config.reward_type == "logit":
+            reward = LogitReward.from_embed(
+                target_prompts=config.target_prompts,
+                baseline_prompts=config.baseline_prompts,
+                embed_base=base_model,
             )
         else:
             raise ValueError(f"Unknown reward_type: {config.reward_type}")
@@ -179,6 +273,8 @@ class RewardModel(nn.Module):
         batch_size = x.shape[0]
         n_episodes = x.shape[0] // self.episode_length
         n_windows = 1 + (self.episode_length - self.window_size) // self.window_step
+
+        logger.debug(f"{x.shape=}, n_episodes: {n_episodes}, n_windows: {n_windows}")
 
         if x.shape[1] != 3:
             x = rearrange(x, "b h w c -> b c h w")
@@ -210,10 +306,8 @@ class RewardModel(nn.Module):
 
         # Compute the reward for each window
         # (n_windows, n_episodes, embedding_dim) -> (n_windows, n_episodes)
-        chunk_rewards = self.reward(x)
-
-        # Assign the reward of each chunk to its last frame
-        flat_rewards = rearrange(chunk_rewards, "n_w n_e -> (n_w n_e)")
+        x = rearrange(x, "n_w n_e d -> (n_w n_e) d", n_w=n_windows, n_e=n_episodes)
+        window_rewards = self.reward(x)
 
         rewards = torch.zeros(batch_size, device=x.device)
 
@@ -224,10 +318,10 @@ class RewardModel(nn.Module):
             - 1
         )
 
-        assert len(indices) == len(flat_rewards)
+        assert len(indices) == len(window_rewards)
 
-        # Assign chunk rewards to the last frame of each chunk
-        rewards[indices] = flat_rewards
+        # Assign window rewards to the last frame of each window
+        rewards[indices] = window_rewards
 
         return rewards
 
