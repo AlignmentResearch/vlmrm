@@ -14,7 +14,7 @@ from vlmrm.envs.base import RENDER_DIM
 
 
 class Config(BaseModel):
-    env_name: Literal["CartPole-v1", "Humanoid-v4", "MountainCarContinuous-v0"]
+    env_name: Literal["CartPole-v1", "Humanoid-v4", "MountainCarContinuous-v0", "ObstacleCourse-v0"]
     base_path: pathlib.Path
     seed: int
     description: str

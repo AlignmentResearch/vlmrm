@@ -5,7 +5,7 @@ from vlmrm.contrib.sb3.clip_rewarded_sac import CLIPRewardedSAC
 
 
 def get_clip_rewarded_rl_algorithm_class(env_name: str) -> BaseAlgorithm:
-    if env_name in ["Humanoid-v4", "MountainCarContinuous-v0"]:
+    if env_name in ["Humanoid-v4", "MountainCarContinuous-v0", "ObstacleCourse-v0"]:
         return CLIPRewardedSAC
     elif env_name in ["CartPole-v1"]:
         return CLIPRewardedDQN
