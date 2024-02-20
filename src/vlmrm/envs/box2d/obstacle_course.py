@@ -33,10 +33,10 @@ except ImportError as e:
     ) from e
 
 
-STATE_W = 96  # less than Atari 160x192
-STATE_H = 96
-VIDEO_W = 600
-VIDEO_H = 400
+STATE_W = 600 # 96  # less than Atari 160x192
+STATE_H = 400 # 96
+VIDEO_W = 600 # 600
+VIDEO_H = 400 # 400
 WINDOW_W = 1000
 WINDOW_H = 800
 
@@ -51,6 +51,7 @@ ZOOM_FOLLOW = True  # Set to False for fixed view (don't use zoom)
 MAZE_W = 10
 MAZE_H = 10
 MAZE_BAD_PATHS = 5  # number of walls to secretly delete
+MAZE_SCALE = 1  # multiplicative factor of maze size
 
 # TODO: remove when maze generation is implemented
 TRACK_DETAIL_STEP = 21 / SCALE
@@ -297,7 +298,8 @@ class Maze():
                         break
                 else:
                     cell_queue.append((new_cell, new_idx))
-                    branches.append([new_cell])
+                    if new_idx != idx:
+                        branches.append([new_cell])
                     new_idx = len(branches)
 
         return branches
@@ -597,6 +599,26 @@ class ObstacleCourse(gym.Env, EzPickle):
         return checkpoints
 
     def _checkpoints_to_track(self, checkpoints):
+        # rough original version: go straight from one checkpoint to the next
+        
+        # TODO: currently does not work. i'm not sure what alpha and beta are doing below, so that may be the issue
+
+        track = []
+        for i in range(len(checkpoints)):
+            # linearly interpolate so spacing <= TRACK_DETAIL_STEP
+            n_pts = math.ceil(math.sqrt(checkpoints[i][1] ** 2 + checkpoints[i][2] ** 2) / TRACK_DETAIL_STEP)
+            track_pts = [(checkpoints[i][0], checkpoints[i][1] * (1 - j / n_pts) + checkpoints[(i + 1) % len(checkpoints)][1] * j / n_pts, checkpoints[i][2] * (1 - j / n_pts) + checkpoints[(i + 1) % len(checkpoints)][2] * j / n_pts) for j in range(n_pts)]
+            
+            for pt in track_pts:
+                alpha, x, y = pt
+                beta = math.atan2(y, x)
+                track.append((alpha, beta, x, y))
+        
+        return track
+
+
+
+    def _checkpoints_to_track_old(self, checkpoints):
         # Go from one checkpoint to another to create track
         x, y, beta = 1.5 * TRACK_RAD, 0, 0
         dest_i = 0
@@ -649,6 +671,7 @@ class ObstacleCourse(gym.Env, EzPickle):
                 beta -= min(TRACK_TURN_RATE, abs(0.001 * proj))
             if proj < -0.3:
                 beta += min(TRACK_TURN_RATE, abs(0.001 * proj))
+            # print("prev beta:", prev_beta, "proj:", proj, "beta:", beta)
             x += p1x * TRACK_DETAIL_STEP
             y += p1y * TRACK_DETAIL_STEP
             track.append((alpha, prev_beta * 0.5 + beta * 0.5, x, y))
@@ -778,13 +801,88 @@ class ObstacleCourse(gym.Env, EzPickle):
 
 
     def _create_track(self):
+        # """
         maze = Maze()
         branches = maze.to_branch_list()
 
         # Create checkpoints
-        checkpoints = []
+        checkpoints_lists = []
+        # Create a list of checkpoints from each branch
+        for branch in branches:
+            alpha = 0  # doesn't do anything in current implementation
+            checkpoints = []
+            for cell in branch:
+                checkpoints.append((alpha, MAZE_SCALE * cell.x, MAZE_SCALE * cell.y))
+            checkpoints_lists.append(checkpoints)
+        # print(maze.display_branches())
+        # print("checkpoints_lists:", checkpoints_lists)
+
+        # Create track sections from each checkpoint list
+        track_sections = []
+        road_poly_sections = []
+        road_sections = []
+        for checkpoints in checkpoints_lists:
+            track_section = self._checkpoints_to_track(checkpoints)
+            # track = self._find_closed_loop_original(track)
+            # if not self._check_track_well_glued(track_section):
+            #     print("track not well glued")
+            #    return False
+            border = self._make_border(track_section)
+            road, road_poly = self._create_tiles(track_section, border)
+            track_sections.append(track_section)
+            road_poly_sections.append(road_poly)
+            road_sections.append(road)
+
+        # Concatenate the track, road_poly, and road sections
+        self.track = list(itertools.chain(*track_sections))
+        self.road_poly = list(itertools.chain(*road_poly_sections))
+        self.road = list(itertools.chain(*road_sections))
+
+        print("len(track):", len(self.track))
+
+        # TODO remove
+        # create a scatterplot of the last two coordinates of self.track using matplotlib, and write it to a file
+        import matplotlib.pyplot as plt
+        import os
+        import time
+
+        # create a directory to store the scatterplots
+        scatterplot_dir = "scatterplots"
+        # TODO: this is just for debugging; you should make this directory yourself
+        # if not os.path.exists(scatterplot_dir):
+        #     os.makedirs(scatterplot_dir)
+        
+        # create a scatterplot of the last two coordinates of self.track
+        x = [track[-2] for track in self.track]
+        y = [track[-1] for track in self.track]
+        # color the points based on track[-3]
+        max_color = max([track[-3] for track in self.track])
+        min_color = min([track[-3] for track in self.track])
+        # scale colors use the color map 'viridis' effectively
+        colors = [100*(track[-3] - min_color) / (max_color - min_color) for track in self.track]
+        print("min color:", min_color, "max color:", max_color, "mean color:", np.mean(colors), "min scaled color:", min(colors), "max scaled color:", max(colors), "median scaled color:", np.median(colors))
+        plt.scatter(x, y, c=colors, cmap='viridis', s=0.01)
+        plt.savefig(os.path.join(scatterplot_dir, f"scatterplot_{time.time()}.png"))
+        # print the number of branches
+        print("len(branches):", len(branches))
+        print("branches:", branches)
+        print("first 100 of track:", self.track[:100])
+
+        # make a scatterplot of the values from all the checkpoints lists
+        """
+        checkpointses = list(itertools.chain(*checkpoints_lists))
+        print("first 20 of checkpointses:", list(checkpointses)[:20])
+        print("len(checkpointses):", len(checkpointses))
+        x = [checkpoint[1] for checkpoint in checkpointses]
+        y = [checkpoint[2] for checkpoint in checkpointses]
+        plt.scatter(x, y, s=0.1)
+        plt.savefig(os.path.join(scatterplot_dir, f"scatterplot_checkpoints_{time.time()}.png"))
+        """
+        return True
+
 
         # TODO: remove original code:
+        """
         checkpoints = self._create_checkpoints_original()
         track = self._checkpoints_to_track(checkpoints)
         track = self._find_closed_loop_original(track)
@@ -794,6 +892,7 @@ class ObstacleCourse(gym.Env, EzPickle):
         self.road, self.road_poly = self._create_tiles(track, border)
         self.track = track
         return True
+        # """
 
     def reset(
         self,
