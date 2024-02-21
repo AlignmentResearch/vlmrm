@@ -1,18 +1,16 @@
 # based on https://github.com/Farama-Foundation/Gymnasium/blob/main/gymnasium/envs/box2d/car_racing.py
 
-import math
-from typing import Optional, Union
 import itertools
+import math
 import random
-
-import numpy as np
+from typing import Literal, Optional, Union
 
 import gymnasium as gym
+import numpy as np
 from gymnasium import spaces
 from gymnasium.envs.box2d.car_dynamics import Car
 from gymnasium.error import DependencyNotInstalled, InvalidAction
 from gymnasium.utils import EzPickle
-
 
 try:
     import Box2D
@@ -33,14 +31,14 @@ except ImportError as e:
     ) from e
 
 
-STATE_W = 600 # 96  # less than Atari 160x192
-STATE_H = 400 # 96
-VIDEO_W = 600 # 600
-VIDEO_H = 400 # 400
+STATE_W = 600  # 96  # less than Atari 160x192
+STATE_H = 400  # 96
+VIDEO_W = 600  # 600
+VIDEO_H = 400  # 400
 WINDOW_W = 1000
 WINDOW_H = 800
 
-SCALE = 6.0  # Track scale
+SCALE = 2.0  # Track scale
 TRACK_RAD = 900 / SCALE  # Track is heavily morphed circle with this radius
 PLAYFIELD = 2000 / SCALE  # Game over boundary
 FPS = 50  # Frames per second
@@ -48,18 +46,16 @@ ZOOM = 2.7  # Camera zoom
 ZOOM_FOLLOW = True  # Set to False for fixed view (don't use zoom)
 
 # maze parameters
-MAZE_W = 10
-MAZE_H = 10
+MAZE_W = 8
+MAZE_H = 8
 MAZE_BAD_PATHS = 5  # number of walls to secretly delete
-MAZE_SCALE = 1  # multiplicative factor of maze size
+MAZE_SCALE = 30  # multiplicative factor of maze size
+EDGE_LEN = 2  # how long each edge is after rendering (in tiles)
 
 # TODO: remove when maze generation is implemented
-TRACK_DETAIL_STEP = 21 / SCALE
-TRACK_TURN_RATE = 0.31
 TRACK_WIDTH = 40 / SCALE
-BORDER = 8 / SCALE
-BORDER_MIN_COUNT = 4
 GRASS_DIM = PLAYFIELD / 20.0
+TRACK_DETAIL_STEP = 21 / SCALE
 MAX_SHAPE_DIM = (
     max(GRASS_DIM, TRACK_WIDTH, TRACK_DETAIL_STEP) * math.sqrt(2) * ZOOM * SCALE
 )
@@ -112,7 +108,8 @@ class FrictionDetector(contactListener):
         else:
             obj.tiles.remove(tile)
 
-class Cell():
+
+class Cell:
     def __init__(self, x, y):
         self.x = x
         self.y = y
@@ -121,14 +118,19 @@ class Cell():
     def __repr__(self):
         return f"Cell({self.x}, {self.y}, {self.tree})"
 
-class Edge():
+
+class Edge:
     def __init__(self, x, y, direction):
         self.x = x
         self.y = y
         self.direction = direction
 
     def __eq__(self, other):
-        return self.x == other.x and self.y == other.y and self.direction == other.direction
+        return (
+            self.x == other.x
+            and self.y == other.y
+            and self.direction == other.direction
+        )
 
     def __hash__(self):
         return hash((self.x, self.y, self.direction))
@@ -140,7 +142,8 @@ class Edge():
         elif self.direction == "E":
             return f"({self.x}, {self.y}) -> ({self.x+1}, {self.y})"
 
-class Tree():
+
+class Tree:
     def __init__(self, label, cells):
         self.cells = cells
         self.label = label
@@ -153,17 +156,32 @@ class Tree():
     def __repr__(self):
         return f"Tree({self.label}, {self.cells})"
 
-class Maze():
+
+Tile = Union[Literal["road"], Literal["grass"], Literal["flowers"]]
+
+
+class Maze:
     def __init__(self):
         # use kruskal's algorithm
 
         # generate grid of cells
         self.cells = [[Cell(x, y) for y in range(MAZE_H)] for x in range(MAZE_W)]
         # generate list of edges
-        east_edge_rows = [[Edge(x, y, "E") for x in range(MAZE_W-1)] for y in range(MAZE_H)]
-        north_edge_rows = [[Edge(x, y, "N") for x in range(MAZE_W)] for y in range(MAZE_H-1)]
+        east_edge_rows = [
+            [Edge(x, y, "E") for x in range(MAZE_W - 1)] for y in range(MAZE_H)
+        ]
+        north_edge_rows = [
+            [Edge(x, y, "N") for x in range(MAZE_W)] for y in range(MAZE_H - 1)
+        ]
         # interleave the sublists
-        self.all_rows = [[v for v in itertools.chain(*itertools.zip_longest(north_row, east_row)) if v is not None] for north_row, east_row in zip(north_edge_rows, east_edge_rows)]
+        self.all_rows = [
+            [
+                v
+                for v in itertools.chain(*itertools.zip_longest(north_row, east_row))
+                if v is not None
+            ]
+            for north_row, east_row in zip(north_edge_rows, east_edge_rows)
+        ]
         # print("all edge rows\n", self.all_rows)
         self.all_edges = list(itertools.chain(*self.all_rows))
         # self.all_edges = list(itertools.chain(*[[v for v in itertools.chain(*itertools.zip_longest(north_row, east_row)) if v is not None] for north_row, east_row in zip(north_edge_rows, east_edge_rows)]))
@@ -197,18 +215,22 @@ class Maze():
                 self.edges.add(edge)
 
         # "hidden" holes in the walls of the maze
-        self.possible_secret_edges = [edge for edge in self.all_edges if edge not in self.edges]
+        self.possible_secret_edges = [
+            edge for edge in self.all_edges if edge not in self.edges
+        ]
         self.secret_edges = set()
         while len(self.secret_edges) < MAZE_BAD_PATHS:
-            edge = self.possible_secret_edges.pop(random.randrange(len(self.possible_secret_edges)))
+            edge = self.possible_secret_edges.pop(
+                random.randrange(len(self.possible_secret_edges))
+            )
             self.secret_edges.add(edge)
 
     def endpoints(self, edge):
         # return the two cells that the edge connects
         if edge.direction == "N":
-            return self.cells[edge.x][edge.y], self.cells[edge.x][edge.y+1]
+            return self.cells[edge.x][edge.y], self.cells[edge.x][edge.y + 1]
         elif edge.direction == "E":
-            return self.cells[edge.x][edge.y], self.cells[edge.x+1][edge.y]
+            return self.cells[edge.x][edge.y], self.cells[edge.x + 1][edge.y]
         else:
             raise ValueError("Invalid direction")
 
@@ -282,7 +304,16 @@ class Maze():
             branches[idx].append(cell)
             # find the edges connected to the cell by checking self.edges for the
             # 4 possible edges that could be connected to cell
-            connected_edges = [edge for edge in [Edge(cell.x, cell.y, "N"), Edge(cell.x, cell.y, "E"), Edge(cell.x-1, cell.y, "E"), Edge(cell.x, cell.y-1, "N")] if edge in self.edges]
+            connected_edges = [
+                edge
+                for edge in [
+                    Edge(cell.x, cell.y, "N"),
+                    Edge(cell.x, cell.y, "E"),
+                    Edge(cell.x - 1, cell.y, "E"),
+                    Edge(cell.x, cell.y - 1, "N"),
+                ]
+                if edge in self.edges
+            ]
             # print(f"connected edges to cell {cell}:", connected_edges)
 
             # add all the following cells to the queue, adding a new branch for each one beyond the first
@@ -306,7 +337,7 @@ class Maze():
 
     def display_branches(self):
         """Display the branches just like the maze, but with different colors for each branch"""
-        branches = [set(branch) for branch in self.to_branch_list()]
+        branches = [set(branch) for branch in self.to_branch_list()][:1]
         # print("branches:", branches)
 
         def edge_to_color(edge):
@@ -316,7 +347,7 @@ class Maze():
                 if cell1 in branch:
                     bg = 41 + (idx % 7)
                     fg = 30
-                    return '\x1b[%sm' % f"0;{fg};{bg}"
+                    return "\x1b[%sm" % f"0;{fg};{bg}"
             return "\033[0m"
 
         out = ""
@@ -371,7 +402,6 @@ class Maze():
         out += "|"
 
         return out
-
 
 
 class ObstacleCourse(gym.Env, EzPickle):
@@ -574,325 +604,49 @@ class ObstacleCourse(gym.Env, EzPickle):
             idx = self.np_random.integers(3)
             self.grass_color[idx] += 20
 
-    def _create_maze(self):
-        # create logical representation of maze
-        maze = Maze()
-
-    def _create_checkpoints_original(self):
-        CHECKPOINTS = 12
-
-        checkpoints = []
-        for c in range(CHECKPOINTS):
-            noise = self.np_random.uniform(0, 2 * math.pi * 1 / CHECKPOINTS)
-            alpha = 2 * math.pi * c / CHECKPOINTS + noise
-            rad = self.np_random.uniform(TRACK_RAD / 3, TRACK_RAD)
-
-            if c == 0:
-                alpha = 0
-                rad = 1.5 * TRACK_RAD
-            if c == CHECKPOINTS - 1:
-                alpha = 2 * math.pi * c / CHECKPOINTS
-                self.start_alpha = 2 * math.pi * (-0.5) / CHECKPOINTS
-                rad = 1.5 * TRACK_RAD
-
-            checkpoints.append((alpha, rad * math.cos(alpha), rad * math.sin(alpha)))
-        return checkpoints
-
-    def _checkpoints_to_track(self, checkpoints):
-        # rough original version: go straight from one checkpoint to the next
-        
-        # TODO: currently does not work. i'm not sure what alpha and beta are doing below, so that may be the issue
-
-        track = []
-        for i in range(len(checkpoints)):
-            # linearly interpolate so spacing <= TRACK_DETAIL_STEP
-            n_pts = math.ceil(math.sqrt(checkpoints[i][1] ** 2 + checkpoints[i][2] ** 2) / TRACK_DETAIL_STEP)
-            track_pts = [(checkpoints[i][0], checkpoints[i][1] * (1 - j / n_pts) + checkpoints[(i + 1) % len(checkpoints)][1] * j / n_pts, checkpoints[i][2] * (1 - j / n_pts) + checkpoints[(i + 1) % len(checkpoints)][2] * j / n_pts) for j in range(n_pts)]
-            
-            for pt in track_pts:
-                alpha, x, y = pt
-                beta = math.atan2(y, x)
-                track.append((alpha, beta, x, y))
-        
-        return track
-
-
-
-    def _checkpoints_to_track_old(self, checkpoints):
-        # Go from one checkpoint to another to create track
-        x, y, beta = 1.5 * TRACK_RAD, 0, 0
-        dest_i = 0
-        laps = 0
-        track = []
-        no_freeze = 2500
-        visited_other_side = False
-        while True:
-            alpha = math.atan2(y, x)
-            if visited_other_side and alpha > 0:
-                laps += 1
-                visited_other_side = False
-            if alpha < 0:
-                visited_other_side = True
-                alpha += 2 * math.pi
-
-            while True:  # Find destination from checkpoints
-                failed = True
-
-                while True:
-                    dest_alpha, dest_x, dest_y = checkpoints[dest_i % len(checkpoints)]
-                    if alpha <= dest_alpha:
-                        failed = False
-                        break
-                    dest_i += 1
-                    if dest_i % len(checkpoints) == 0:
-                        break
-
-                if not failed:
-                    break
-
-                alpha -= 2 * math.pi
-                continue
-
-            r1x = math.cos(beta)
-            r1y = math.sin(beta)
-            p1x = -r1y
-            p1y = r1x
-            dest_dx = dest_x - x  # vector towards destination
-            dest_dy = dest_y - y
-            # destination vector projected on rad:
-            proj = r1x * dest_dx + r1y * dest_dy
-            while beta - alpha > 1.5 * math.pi:
-                beta -= 2 * math.pi
-            while beta - alpha < -1.5 * math.pi:
-                beta += 2 * math.pi
-            prev_beta = beta
-            proj *= SCALE
-            if proj > 0.3:
-                beta -= min(TRACK_TURN_RATE, abs(0.001 * proj))
-            if proj < -0.3:
-                beta += min(TRACK_TURN_RATE, abs(0.001 * proj))
-            # print("prev beta:", prev_beta, "proj:", proj, "beta:", beta)
-            x += p1x * TRACK_DETAIL_STEP
-            y += p1y * TRACK_DETAIL_STEP
-            track.append((alpha, prev_beta * 0.5 + beta * 0.5, x, y))
-            if laps > 4:
-                break
-            no_freeze -= 1
-            if no_freeze == 0:
-                break
-
-        return track
-
-    def _find_closed_loop_original(self, track):
-        # Find closed loop range i1..i2, first loop should be ignored, second is OK
-        i1, i2 = -1, -1
-        i = len(track)
-        while True:
-            i -= 1
-            if i == 0:
-                return False
-            pass_through_start = (
-                track[i][0] > self.start_alpha and track[i - 1][0] <= self.start_alpha
-            )
-            if pass_through_start and i2 == -1:
-                i2 = i
-            elif pass_through_start and i1 == -1:
-                i1 = i
-                break
-        if self.verbose:
-            print("Track generation: %i..%i -> %i-tiles track" % (i1, i2, i2 - i1))
-        assert i1 != -1
-        assert i2 != -1
-
-        return track[i1 : i2 - 1]
-
-    def _check_track_well_glued(self, track):
-        first_beta = track[0][1]
-        first_perp_x = math.cos(first_beta)
-        first_perp_y = math.sin(first_beta)
-        # Length of perpendicular jump to put together head and tail
-        well_glued_together = np.sqrt(
-            np.square(first_perp_x * (track[0][2] - track[-1][2]))
-            + np.square(first_perp_y * (track[0][3] - track[-1][3]))
-        )
-        if well_glued_together > TRACK_DETAIL_STEP:
-            return False
-        return True
-
-    def _make_border(self, track):
-        # Red-white border on hard turns
-        border = [False] * len(track)
-        for i in range(len(track)):
-            good = True
-            oneside = 0
-            for neg in range(BORDER_MIN_COUNT):
-                beta1 = track[i - neg - 0][1]
-                beta2 = track[i - neg - 1][1]
-                good &= abs(beta1 - beta2) > TRACK_TURN_RATE * 0.2
-                oneside += np.sign(beta1 - beta2)
-            good &= abs(oneside) == BORDER_MIN_COUNT
-            border[i] = good
-        for i in range(len(track)):
-            for neg in range(BORDER_MIN_COUNT):
-                border[i - neg] |= border[i]
-        return border
-
-    def _create_tiles(self, track, border):
-        """Return road and road_poly"""
-        road = []
-        road_poly = []
-        # Create tiles
-        for i in range(len(track)):
-            alpha1, beta1, x1, y1 = track[i]
-            alpha2, beta2, x2, y2 = track[i - 1]
-            road1_l = (
-                x1 - TRACK_WIDTH * math.cos(beta1),
-                y1 - TRACK_WIDTH * math.sin(beta1),
-            )
-            road1_r = (
-                x1 + TRACK_WIDTH * math.cos(beta1),
-                y1 + TRACK_WIDTH * math.sin(beta1),
-            )
-            road2_l = (
-                x2 - TRACK_WIDTH * math.cos(beta2),
-                y2 - TRACK_WIDTH * math.sin(beta2),
-            )
-            road2_r = (
-                x2 + TRACK_WIDTH * math.cos(beta2),
-                y2 + TRACK_WIDTH * math.sin(beta2),
-            )
-            vertices = [road1_l, road1_r, road2_r, road2_l]
-            self.fd_tile.shape.vertices = vertices
-            t = self.world.CreateStaticBody(fixtures=self.fd_tile)
-            t.userData = t
-            c = 0.01 * (i % 3) * 255
-            t.color = self.road_color + c
-            t.road_visited = False
-            t.road_friction = 1.0
-            t.idx = i
-            t.fixtures[0].sensor = True
-            road_poly.append(([road1_l, road1_r, road2_r, road2_l], t.color))
-            road.append(t)
-            if border[i]:
-                side = np.sign(beta2 - beta1)
-                b1_l = (
-                    x1 + side * TRACK_WIDTH * math.cos(beta1),
-                    y1 + side * TRACK_WIDTH * math.sin(beta1),
-                )
-                b1_r = (
-                    x1 + side * (TRACK_WIDTH + BORDER) * math.cos(beta1),
-                    y1 + side * (TRACK_WIDTH + BORDER) * math.sin(beta1),
-                )
-                b2_l = (
-                    x2 + side * TRACK_WIDTH * math.cos(beta2),
-                    y2 + side * TRACK_WIDTH * math.sin(beta2),
-                )
-                b2_r = (
-                    x2 + side * (TRACK_WIDTH + BORDER) * math.cos(beta2),
-                    y2 + side * (TRACK_WIDTH + BORDER) * math.sin(beta2),
-                )
-                road_poly.append(
-                    (
-                        [b1_l, b1_r, b2_r, b2_l],
-                        (255, 255, 255) if i % 2 == 0 else (255, 0, 0),
-                    )
-                )
-        return road, road_poly
-
-
     def _create_track(self):
-        # """
         maze = Maze()
-        branches = maze.to_branch_list()
+        roadpieces = self._generate_roadpieces(maze.edges)
+        secret_roadpieces = self._generate_roadpieces(maze.secret_edges)
+        self.track = sorted(
+            [
+                (x * TRACK_WIDTH, y * TRACK_WIDTH)
+                for x, y in roadpieces + secret_roadpieces
+            ]
+        )
+        self.road_poly = [
+            self._roadpiece_to_poly(r, is_secret=False) for r in roadpieces
+        ] + [self._roadpiece_to_poly(r, is_secret=True) for r in secret_roadpieces]
 
-        # Create checkpoints
-        checkpoints_lists = []
-        # Create a list of checkpoints from each branch
-        for branch in branches:
-            alpha = 0  # doesn't do anything in current implementation
-            checkpoints = []
-            for cell in branch:
-                checkpoints.append((alpha, MAZE_SCALE * cell.x, MAZE_SCALE * cell.y))
-            checkpoints_lists.append(checkpoints)
-        # print(maze.display_branches())
-        # print("checkpoints_lists:", checkpoints_lists)
+    def _generate_roadpieces(self, edges):
+        result = set()
+        for edge in edges:
+            for d in range(EDGE_LEN + 1):
+                dx = d if edge.direction == "E" else 0
+                dy = d if edge.direction == "N" else 0
+                result.add((edge.x * EDGE_LEN + dx, edge.y * EDGE_LEN + dy))
+        return list(result)
 
-        # Create track sections from each checkpoint list
-        track_sections = []
-        road_poly_sections = []
-        road_sections = []
-        for checkpoints in checkpoints_lists:
-            track_section = self._checkpoints_to_track(checkpoints)
-            # track = self._find_closed_loop_original(track)
-            # if not self._check_track_well_glued(track_section):
-            #     print("track not well glued")
-            #    return False
-            border = self._make_border(track_section)
-            road, road_poly = self._create_tiles(track_section, border)
-            track_sections.append(track_section)
-            road_poly_sections.append(road_poly)
-            road_sections.append(road)
+    def _roadpiece_to_poly(self, roadpiece, is_secret):
+        x, y = roadpiece
+        w = TRACK_WIDTH
+        self.fd_tile.shape = polygonShape(box=(w / 2, w / 2, (x * w, y * w), 0))
+        vertices = self.fd_tile.shape.vertices
 
-        # Concatenate the track, road_poly, and road sections
-        self.track = list(itertools.chain(*track_sections))
-        self.road_poly = list(itertools.chain(*road_poly_sections))
-        self.road = list(itertools.chain(*road_sections))
+        if is_secret:
+            color = np.array([102, 255, 102])
+        else:
+            color = self.road_color + 0.02 * (random.random()) * 255
 
-        print("len(track):", len(self.track))
+        t = self.world.CreateStaticBody(fixtures=self.fd_tile)
+        t.userData = t
+        t.color = color
+        t.road_visited = False
+        t.road_friction = 1.0
+        t.idx = 10
+        t.fixtures[0].sensor = True
 
-        # TODO remove
-        # create a scatterplot of the last two coordinates of self.track using matplotlib, and write it to a file
-        import matplotlib.pyplot as plt
-        import os
-        import time
-
-        # create a directory to store the scatterplots
-        scatterplot_dir = "scatterplots"
-        # TODO: this is just for debugging; you should make this directory yourself
-        # if not os.path.exists(scatterplot_dir):
-        #     os.makedirs(scatterplot_dir)
-        
-        # create a scatterplot of the last two coordinates of self.track
-        x = [track[-2] for track in self.track]
-        y = [track[-1] for track in self.track]
-        # color the points based on track[-3]
-        max_color = max([track[-3] for track in self.track])
-        min_color = min([track[-3] for track in self.track])
-        # scale colors use the color map 'viridis' effectively
-        colors = [100*(track[-3] - min_color) / (max_color - min_color) for track in self.track]
-        print("min color:", min_color, "max color:", max_color, "mean color:", np.mean(colors), "min scaled color:", min(colors), "max scaled color:", max(colors), "median scaled color:", np.median(colors))
-        plt.scatter(x, y, c=colors, cmap='viridis', s=0.01)
-        plt.savefig(os.path.join(scatterplot_dir, f"scatterplot_{time.time()}.png"))
-        # print the number of branches
-        print("len(branches):", len(branches))
-        print("branches:", branches)
-        print("first 100 of track:", self.track[:100])
-
-        # make a scatterplot of the values from all the checkpoints lists
-        """
-        checkpointses = list(itertools.chain(*checkpoints_lists))
-        print("first 20 of checkpointses:", list(checkpointses)[:20])
-        print("len(checkpointses):", len(checkpointses))
-        x = [checkpoint[1] for checkpoint in checkpointses]
-        y = [checkpoint[2] for checkpoint in checkpointses]
-        plt.scatter(x, y, s=0.1)
-        plt.savefig(os.path.join(scatterplot_dir, f"scatterplot_checkpoints_{time.time()}.png"))
-        """
-        return True
-
-
-        # TODO: remove original code:
-        """
-        checkpoints = self._create_checkpoints_original()
-        track = self._checkpoints_to_track(checkpoints)
-        track = self._find_closed_loop_original(track)
-        if not self._check_track_well_glued(track):
-            return False
-        border = self._make_border(track)
-        self.road, self.road_poly = self._create_tiles(track, border)
-        self.track = track
-        return True
-        # """
+        return (vertices, color)
 
     def reset(
         self,
@@ -921,16 +675,9 @@ class ObstacleCourse(gym.Env, EzPickle):
 
             self._reinit_colors(randomize)
 
-        while True:
-            success = self._create_track()
-            if success:
-                break
-            if self.verbose:
-                print(
-                    "retry to generate track (normal if there are not many"
-                    "instances of this message)"
-                )
-        self.car = Car(self.world, *self.track[0][1:4])
+        self._create_track()
+
+        self.car = Car(self.world, 0, init_x=self.track[0][0], init_y=self.track[0][1])
 
         if self.render_mode == "human":
             self.render()
@@ -1015,7 +762,9 @@ class ObstacleCourse(gym.Env, EzPickle):
         # computing transformations
         angle = -self.car.hull.angle
         # Animating first second zoom.
-        zoom = 0.1 * SCALE # 0.1 * SCALE * max(1 - self.t, 0) + ZOOM * SCALE * min(self.t, 1)
+        zoom = 0.1 * SCALE * max(1 - self.t, 0) + ZOOM * SCALE * min(
+            self.t, 1
+        )  # 0.1 * SCALE * max(1 - self.t, 0) + ZOOM * SCALE * min(self.t, 1)
         scroll_x = -(self.car.hull.position[0]) * zoom
         scroll_y = -(self.car.hull.position[1]) * zoom
         trans = pygame.math.Vector2((scroll_x, scroll_y)).rotate_rad(angle)
