@@ -31,8 +31,8 @@ except ImportError as e:
     ) from e
 
 
-STATE_W = 600  # 96  # less than Atari 160x192
-STATE_H = 400  # 96
+STATE_W = 1200  # 96  # less than Atari 160x192
+STATE_H = 1200  # 96
 VIDEO_W = 600  # 600
 VIDEO_H = 400  # 400
 WINDOW_W = 1000
@@ -40,7 +40,7 @@ WINDOW_H = 800
 
 SCALE = 2.0  # Track scale
 TRACK_RAD = 900 / SCALE  # Track is heavily morphed circle with this radius
-PLAYFIELD = 2000 / SCALE  # Game over boundary
+PLAYFIELD = 4000 / SCALE  # Game over boundary
 FPS = 50  # Frames per second
 ZOOM = 2.7  # Camera zoom
 ZOOM_FOLLOW = True  # Set to False for fixed view (don't use zoom)
@@ -50,7 +50,7 @@ MAZE_W = 8
 MAZE_H = 8
 MAZE_BAD_PATHS = 5  # number of walls to secretly delete
 MAZE_SCALE = 30  # multiplicative factor of maze size
-EDGE_LEN = 2  # how long each edge is after rendering (in tiles)
+EDGE_LEN = 5  # how long each edge is after rendering (in tiles)
 
 # TODO: remove when maze generation is implemented
 TRACK_WIDTH = 40 / SCALE
@@ -404,6 +404,85 @@ class Maze:
         return out
 
 
+class RoadBuilder:
+    def __init__(self, origin, edges=[]):
+        self.origin = origin
+        self.edges = edges
+
+    def add_road(self, direction: Literal["up", "down", "left", "right"]):
+        x, y = self.origin
+        if direction == "up":
+            new_origin = (x, y + 1)
+            new_edge = Edge(x, y, "N")
+        elif direction == "down":
+            new_origin = (x, y - 1)
+            new_edge = Edge(x, y - 1, "N")
+        elif direction == "right":
+            new_origin = (x + 1, y)
+            new_edge = Edge(x, y, "E")
+        elif direction == "left":
+            new_origin = (x - 1, y)
+            new_edge = Edge(x - 1, y, "E")
+        self.edges.append(new_edge)
+        return RoadBuilder(new_origin, self.edges)
+
+
+class TestingGround:
+    def __init__(self, spacing=5, origin=(0, 0)) -> None:
+        self.secret_edges = []  # for compatibility with Maze
+        self.edges = []
+
+        ox, oy = origin
+
+        # Crossroad
+        b = RoadBuilder(origin).add_road("up")
+        b.add_road("left")
+        b.add_road("right")
+        b.add_road("up")
+        self.edges += b.edges
+
+        # Right turn
+        b = RoadBuilder((ox + 1 * spacing, oy)).add_road("up").add_road("right")
+        self.edges += b.edges
+
+        # Left turn
+        b = RoadBuilder((ox + 2 * spacing, oy)).add_road("up").add_road("left")
+        self.edges += b.edges
+
+        # T-junction
+        b = RoadBuilder((ox + 3 * spacing, oy)).add_road("up")
+        b.add_road("left")
+        b.add_road("right")
+        self.edges += b.edges
+
+        # U-turn
+        b = (
+            RoadBuilder((ox + 4 * spacing, oy))
+            .add_road("up")
+            .add_road("right")
+            .add_road("down")
+        )
+        self.edges += b.edges
+
+        # Straight road
+        b = (
+            RoadBuilder((ox + 5 * spacing, oy))
+            .add_road("up")
+            .add_road("up")
+            .add_road("up")
+        )
+
+        # Grid
+        size = 3
+        for i in range(size + 1):
+            bv = RoadBuilder((ox + 6 * spacing + i, oy))
+            bh = RoadBuilder((ox + 6 * spacing, oy + i))
+            for _ in range(size):
+                bv = bv.add_road("up")
+                bh = bh.add_road("right")
+            self.edges += bv.edges + bh.edges
+
+
 class ObstacleCourse(gym.Env, EzPickle):
     """
     ## Description
@@ -605,7 +684,7 @@ class ObstacleCourse(gym.Env, EzPickle):
             self.grass_color[idx] += 20
 
     def _create_track(self):
-        maze = Maze()
+        maze = TestingGround(origin=(-10, 0), spacing=2)
         roadpieces = self._generate_roadpieces(maze.edges)
         secret_roadpieces = self._generate_roadpieces(maze.secret_edges)
         self.track = sorted(
