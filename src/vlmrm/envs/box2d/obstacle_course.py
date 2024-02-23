@@ -3,12 +3,15 @@
 import itertools
 import math
 import random
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Union, Tuple
 
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
-from gymnasium.envs.box2d.car_dynamics import Car
+from gymnasium.envs.box2d.car_dynamics import (
+    Car as GymCar,
+    FRICTION_LIMIT, WHEEL_MOMENT_OF_INERTIA, ENGINE_POWER, SIZE
+)
 from gymnasium.error import DependencyNotInstalled, InvalidAction
 from gymnasium.utils import EzPickle
 
@@ -30,27 +33,24 @@ except ImportError as e:
         "pygame is not installed, run `pip install gymnasium[box2d]`"
     ) from e
 
+# maze parameters
+MAZE_W = 8
+MAZE_H = 8
+MAZE_BAD_PATHS = 5  # number of walls to secretly delete
+EDGE_LEN = 2  # how long each edge is after rendering (in tiles)
 
-STATE_W = 600  # 96  # less than Atari 160x192
-STATE_H = 400  # 96
-VIDEO_W = 600  # 600
-VIDEO_H = 400  # 400
-WINDOW_W = 1000
-WINDOW_H = 800
+FLOWER_COLOR = (255, 0, 255)
+FRICTION_LIMIT_GRASS = FRICTION_LIMIT * 0.001  # originally FRICTION_LIMIT * 0.6
+
 
 SCALE = 2.0  # Track scale
 TRACK_RAD = 900 / SCALE  # Track is heavily morphed circle with this radius
 PLAYFIELD = 2000 / SCALE  # Game over boundary
 FPS = 50  # Frames per second
-ZOOM = 2.7  # Camera zoom
-ZOOM_FOLLOW = True  # Set to False for fixed view (don't use zoom)
+ZOOM = 10 # 2.7  # Camera zoom
+ZOOM_FOLLOW = False  # Set to False for fixed view (don't use zoom)
 
-# maze parameters
-MAZE_W = 8
-MAZE_H = 8
-MAZE_BAD_PATHS = 5  # number of walls to secretly delete
-MAZE_SCALE = 30  # multiplicative factor of maze size
-EDGE_LEN = 2  # how long each edge is after rendering (in tiles)
+
 
 # TODO: remove when maze generation is implemented
 TRACK_WIDTH = 40 / SCALE
@@ -59,6 +59,14 @@ TRACK_DETAIL_STEP = 21 / SCALE
 MAX_SHAPE_DIM = (
     max(GRASS_DIM, TRACK_WIDTH, TRACK_DETAIL_STEP) * math.sqrt(2) * ZOOM * SCALE
 )
+
+
+STATE_W = 600 # int(TRACK_WIDTH) * MAZE_W  # 600  # 96  # less than Atari 160x192
+STATE_H = 400 # int(TRACK_WIDTH) * MAZE_H  # 400  # 96
+VIDEO_W = 600 # int(TRACK_WIDTH) * MAZE_W # 600  # 600
+VIDEO_H = 400 # int(TRACK_WIDTH) * MAZE_H # 400  # 400
+WINDOW_W = 1000
+WINDOW_H = 800
 
 
 class FrictionDetector(contactListener):
@@ -403,6 +411,104 @@ class Maze:
 
         return out
 
+class Car(GymCar):
+    def step(self, dt):
+        """Copied and pasted from car_dynamics.py so that the friction limit can be changed"""
+        for w in self.wheels:
+            # Steer each wheel
+            dir = np.sign(w.steer - w.joint.angle)
+            val = abs(w.steer - w.joint.angle)
+            w.joint.motorSpeed = dir * min(50.0 * val, 3.0)
+
+            # Position => friction_limit
+            grass = True
+            friction_limit = FRICTION_LIMIT_GRASS  # Grass friction if no tile
+            for tile in w.tiles:
+                friction_limit = max(
+                    friction_limit, FRICTION_LIMIT * tile.road_friction
+                )
+                grass = False
+
+            # Force
+            forw = w.GetWorldVector((0, 1))
+            side = w.GetWorldVector((1, 0))
+            v = w.linearVelocity
+            vf = forw[0] * v[0] + forw[1] * v[1]  # forward speed
+            vs = side[0] * v[0] + side[1] * v[1]  # side speed
+
+            # WHEEL_MOMENT_OF_INERTIA*np.square(w.omega)/2 = E -- energy
+            # WHEEL_MOMENT_OF_INERTIA*w.omega * domega/dt = dE/dt = W -- power
+            # domega = dt*W/WHEEL_MOMENT_OF_INERTIA/w.omega
+
+            # add small coef not to divide by zero
+            w.omega += (
+                dt
+                * ENGINE_POWER
+                * w.gas
+                / WHEEL_MOMENT_OF_INERTIA
+                / (abs(w.omega) + 5.0)
+            )
+            self.fuel_spent += dt * ENGINE_POWER * w.gas
+
+            if w.brake >= 0.9:
+                w.omega = 0
+            elif w.brake > 0:
+                BRAKE_FORCE = 15  # radians per second
+                dir = -np.sign(w.omega)
+                val = BRAKE_FORCE * w.brake
+                if abs(val) > abs(w.omega):
+                    val = abs(w.omega)  # low speed => same as = 0
+                w.omega += dir * val
+            w.phase += w.omega * dt
+
+            vr = w.omega * w.wheel_rad  # rotating wheel speed
+            f_force = -vf + vr  # force direction is direction of speed difference
+            p_force = -vs
+
+            # Physically correct is to always apply friction_limit until speed is equal.
+            # But dt is finite, that will lead to oscillations if difference is already near zero.
+
+            # Random coefficient to cut oscillations in few steps (have no effect on friction_limit)
+            f_force *= 205000 * SIZE * SIZE
+            p_force *= 205000 * SIZE * SIZE
+            force = np.sqrt(np.square(f_force) + np.square(p_force))
+
+            # Skid trace
+            if abs(force) > 2.0 * friction_limit:
+                if (
+                    w.skid_particle
+                    and w.skid_particle.grass == grass
+                    and len(w.skid_particle.poly) < 30
+                ):
+                    w.skid_particle.poly.append((w.position[0], w.position[1]))
+                elif w.skid_start is None:
+                    w.skid_start = w.position
+                else:
+                    w.skid_particle = self._create_particle(
+                        w.skid_start, w.position, grass
+                    )
+                    w.skid_start = None
+            else:
+                w.skid_start = None
+                w.skid_particle = None
+
+            if abs(force) > friction_limit:
+                f_force /= force
+                p_force /= force
+                force = friction_limit  # Correct physics here
+                f_force *= force
+                p_force *= force
+
+            w.omega -= dt * f_force * w.wheel_rad / WHEEL_MOMENT_OF_INERTIA
+
+            w.ApplyForceToCenter(
+                (
+                    p_force * side[0] + f_force * forw[0],
+                    p_force * side[1] + f_force * forw[1],
+                ),
+                True,
+            )
+
 
 class ObstacleCourse(gym.Env, EzPickle):
     """
@@ -606,8 +712,8 @@ class ObstacleCourse(gym.Env, EzPickle):
 
     def _create_track(self):
         maze = Maze()
-        roadpieces = self._generate_roadpieces(maze.edges)
-        secret_roadpieces = self._generate_roadpieces(maze.secret_edges)
+        roadpieces = self._generate_roadpieces(maze.edges, include_ends=True)
+        secret_roadpieces = self._generate_roadpieces(maze.secret_edges, include_ends=False)
         self.track = sorted(
             [
                 (x * TRACK_WIDTH, y * TRACK_WIDTH)
@@ -618,10 +724,11 @@ class ObstacleCourse(gym.Env, EzPickle):
             self._roadpiece_to_poly(r, is_secret=False) for r in roadpieces
         ] + [self._roadpiece_to_poly(r, is_secret=True) for r in secret_roadpieces]
 
-    def _generate_roadpieces(self, edges):
+    def _generate_roadpieces(self, edges, include_ends=False):
         result = set()
         for edge in edges:
-            for d in range(EDGE_LEN + 1):
+            idxs = range(EDGE_LEN + 1) if include_ends else range(1, EDGE_LEN)
+            for d in idxs:
                 dx = d if edge.direction == "E" else 0
                 dy = d if edge.direction == "N" else 0
                 result.add((edge.x * EDGE_LEN + dx, edge.y * EDGE_LEN + dy))
@@ -634,7 +741,7 @@ class ObstacleCourse(gym.Env, EzPickle):
         vertices = self.fd_tile.shape.vertices
 
         if is_secret:
-            color = np.array([102, 255, 102])
+            color = np.array(FLOWER_COLOR)
         else:
             color = self.road_color + 0.02 * (random.random()) * 255
 
@@ -683,7 +790,7 @@ class ObstacleCourse(gym.Env, EzPickle):
             self.render()
         return self.step(None)[0], {}
 
-    def step(self, action: Union[np.ndarray, int]):
+    def step(self, action: Union[np.ndarray, int]) -> Tuple[np.ndarray, float, bool, dict]:
         assert self.car is not None
         if action is not None:
             if self.continuous:
@@ -760,13 +867,19 @@ class ObstacleCourse(gym.Env, EzPickle):
 
         assert self.car is not None
         # computing transformations
-        angle = -self.car.hull.angle
-        # Animating first second zoom.
-        zoom = 0.1 * SCALE * max(1 - self.t, 0) + ZOOM * SCALE * min(
-            self.t, 1
-        )  # 0.1 * SCALE * max(1 - self.t, 0) + ZOOM * SCALE * min(self.t, 1)
-        scroll_x = -(self.car.hull.position[0]) * zoom
-        scroll_y = -(self.car.hull.position[1]) * zoom
+        if ZOOM_FOLLOW:
+            angle = -self.car.hull.angle
+            # Animating first second zoom.
+            zoom = 0.1 * SCALE * max(1 - self.t, 0) + ZOOM * SCALE * min(self.t, 1)
+            scroll_x = -(self.car.hull.position[0]) * zoom
+            scroll_y = -(self.car.hull.position[1]) * zoom
+        else:
+            angle = 0
+            zoom = ZOOM * SCALE * 0.1
+            # center the x coordinate on the middle of the maze
+            scroll_x = - MAZE_W * TRACK_WIDTH / 2 * 2 * zoom
+            scroll_y = 0
+
         trans = pygame.math.Vector2((scroll_x, scroll_y)).rotate_rad(angle)
         trans = (WINDOW_W / 2 + trans[0], WINDOW_H / 4 + trans[1])
 

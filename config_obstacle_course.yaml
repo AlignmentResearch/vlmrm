@@ -17,7 +17,7 @@ reward:
   batch_size: 1600
   alpha: 0.5 # Alpha value of Baseline CLIP (CO-RELATE)
   target_prompts: # Description of the goal state
-    - car viewed from above in the middle of a road
+    - car viewed from above in the middle of a gray road, not on a pink square
   baseline_prompts: # Description of the environment
     - car viewed from above
   # Path to pre-saved model weights. When executing multiple runs,
