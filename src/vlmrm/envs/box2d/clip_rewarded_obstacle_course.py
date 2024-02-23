@@ -3,11 +3,13 @@ import pathlib
 from typing import Dict, Optional, Tuple
 
 import numpy as np
-from .obstacle_course import (
+from vlmrm.envs.box2d.obstacle_course import (
     ObstacleCourse,
     VIDEO_W,
     VIDEO_H,
+
 )
+
 # from gymnasium.envs.box2d.car_racing import (
 #     CarRacing as ObstacleCourse,
 # )
@@ -52,7 +54,7 @@ class CLIPRewardedObstacleCourseEnv(ObstacleCourse):
 
         info["success"] = self.success
         return (
-            np.array(self.state, dtype=np.float32),  # obs
+            np.array(self.state, dtype=np.float32), # deliberately broken (should be uint8) as a hack for debugging print output # dtype=np.uint8), # dtype=np.float32),  # obs
             reward,
             terminated,
             truncated,

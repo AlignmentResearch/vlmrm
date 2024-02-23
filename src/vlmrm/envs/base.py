@@ -2,6 +2,7 @@ from typing import Callable
 
 import gymnasium
 
+from vlmrm.envs.box2d.obstacle_course import VIDEO_W, VIDEO_H
 
 def get_clip_rewarded_env_name(env_name: str) -> str:
     return "vlmrm/CLIPRewarded" + env_name
@@ -11,7 +12,7 @@ RENDER_DIM = {
     "CartPole-v1": (400, 600),
     "MountainCarContinuous-v0": (400, 600),
     "Humanoid-v4": (480, 480),
-    "ObstacleCourse-v0": (400, 600),
+    "ObstacleCourse-v0": (VIDEO_H, VIDEO_W),
 }
 
 
