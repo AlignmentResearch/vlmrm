@@ -14,8 +14,8 @@ from vlmrm.contrib.viclip import get_viclip
 from vlmrm.trainer.config import CLIPRewardConfig
 
 
-class BaseModel(Protocol):
-    def embed_text(self, x) -> torch.Tensor:
+class TextEncoder(Protocol):
+    def encode_text(self, x) -> torch.Tensor:
         ...
 
 
@@ -29,7 +29,7 @@ class CLIP(nn.Module):
         )  # type: ignore
 
     @torch.inference_mode()
-    def embed_text(self, x: List[str]) -> torch.Tensor:
+    def encode_text(self, x: List[str]) -> torch.Tensor:
         tokens = open_clip.tokenize(x)
         encoded = self._model.encode_text(tokens).float()
         encoded = encoded / encoded.norm(dim=-1, keepdim=True)
@@ -37,13 +37,13 @@ class CLIP(nn.Module):
         return encoded
 
     @torch.inference_mode()
-    def embed_image(self, x: torch.Tensor) -> torch.Tensor:
+    def encode_image(self, x: torch.Tensor) -> torch.Tensor:
         encoded = self._model.encode_image(x, normalize=True)
         return encoded
 
 
 class ViCLIP(nn.Module):
-    def __init__(self, cache_dir: str, frames_per_video: int) -> None:
+    def __init__(self, cache_dir: str, frames_per_video: int = 8) -> None:
         super().__init__()
         model_name = "ViCLIP-L_InternVid-FLT-10M.pth"
         path = Path(cache_dir) / model_name
@@ -52,18 +52,18 @@ class ViCLIP(nn.Module):
         )
 
     @torch.inference_mode()
-    def embed_text(self, x: List[str]) -> torch.Tensor:
+    def encode_text(self, x: List[str]) -> torch.Tensor:
         result = [self._model.get_text_features(t, self._tokenizer) for t in x]
         result = torch.cat(result)
         return result
 
 
-class Embed(nn.Module):
+class VideoEncoder(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         ...
 
 
-class ViCLIPEmbed(Embed):
+class ViCLIPEmbed(VideoEncoder):
     _base_model: ViCLIP
 
     def __init__(self, base_model: ViCLIP) -> None:
@@ -107,7 +107,7 @@ class ViCLIPEmbed(Embed):
         return window_embed
 
 
-class AvgCLIPEmbed(Embed):
+class AvgCLIPEmbed(VideoEncoder):
     _base_model: CLIP
 
     def __init__(self, base_model: CLIP):
@@ -163,14 +163,14 @@ class ProjectionReward(Reward):
         return y
 
     @staticmethod
-    def from_embed(
+    def from_model(
         target_prompts: list[str],
         baseline_prompts: list[str],
-        embed_base: BaseModel,
+        model: TextEncoder,
         alpha: float,
     ) -> "ProjectionReward":
-        target = embed_base.embed_text(target_prompts).mean(dim=0, keepdim=True)
-        baseline = embed_base.embed_text(baseline_prompts).mean(dim=0, keepdim=True)
+        target = model.encode_text(target_prompts).mean(dim=0, keepdim=True)
+        baseline = model.encode_text(baseline_prompts).mean(dim=0, keepdim=True)
         direction = target - baseline
         projection = ProjectionReward._compute_projection(direction, alpha)
 
@@ -196,13 +196,13 @@ class LogitReward(Reward):
         return y
 
     @staticmethod
-    def from_embed(
+    def from_model(
         target_prompts: list[str],
         baseline_prompts: list[str],
-        embed_base: BaseModel,
+        model: TextEncoder,
     ) -> "LogitReward":
-        target = embed_base.embed_text(target_prompts).mean(dim=0, keepdim=True)
-        baselines = embed_base.embed_text(baseline_prompts)
+        target = model.encode_text(target_prompts).mean(dim=0, keepdim=True)
+        baselines = model.encode_text(baseline_prompts)
 
         return LogitReward(baselines, target)
 
@@ -210,7 +210,7 @@ class LogitReward(Reward):
 class RewardModel(nn.Module):
     def __init__(
         self,
-        embed: Embed,
+        embed: VideoEncoder,
         reward: Reward,
         window_size: int,
         window_step: int,
@@ -241,17 +241,17 @@ class RewardModel(nn.Module):
             raise ValueError(f"Unknown embed_type: {config.embed_type}")
 
         if config.reward_type == "projection":
-            reward = ProjectionReward.from_embed(
+            reward = ProjectionReward.from_model(
                 target_prompts=config.target_prompts,
                 baseline_prompts=config.baseline_prompts,
-                embed_base=base_model,
+                model=base_model,
                 alpha=config.alpha,
             )
         elif config.reward_type == "logit":
-            reward = LogitReward.from_embed(
+            reward = LogitReward.from_model(
                 target_prompts=config.target_prompts,
                 baseline_prompts=config.baseline_prompts,
-                embed_base=base_model,
+                model=base_model,
             )
         else:
             raise ValueError(f"Unknown reward_type: {config.reward_type}")
