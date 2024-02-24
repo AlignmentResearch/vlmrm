@@ -23,7 +23,7 @@ from vlmrm.contrib.sb3.make_vec_env import make_vec_env
 from vlmrm.contrib.sb3.signal_handler import end_signal_handler
 from vlmrm.contrib.sb3.subproc_vec_env import SubprocVecEnv
 from vlmrm.envs.base import get_clip_rewarded_env_name, get_make_env, is_3d_env
-from vlmrm.reward_model import RewardModel, dist_worker_compute_reward
+from vlmrm.reward.reward_model import RewardModel, dist_worker_compute_reward
 from vlmrm.trainer.config import CLIPRewardConfig, Config
 
 signal.signal(signal.SIGINT, end_signal_handler)

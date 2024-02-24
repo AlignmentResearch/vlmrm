@@ -17,7 +17,7 @@ from stable_baselines3.common.utils import check_for_correct_spaces, safe_mean
 from stable_baselines3.common.vec_env import VecEnv
 from stable_baselines3.common.vec_env.patch_gym import _convert_space
 from vlmrm.contrib.sb3.clip_buffer import CLIPReplayBuffer
-from vlmrm.reward_model import RewardModel, compute_rewards
+from vlmrm.reward.reward_model import RewardModel, compute_rewards
 from vlmrm.trainer.config import CLIPRewardConfig, Config
 
 SelfCLIPRewardedSAC = TypeVar("SelfCLIPRewardedSAC", bound="CLIPRewardedSAC")

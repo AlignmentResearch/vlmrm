@@ -15,39 +15,13 @@ def load_video(path: str):
         return iio.imread(path, format="FFMPEG")
 
 
-def load_prompts(path: str, verbose: bool) -> List[str]:
-    prompts = []
-
-    with open(path, "r") as f:
-        for line in f.readlines():
-            prompts.append(line.rstrip("\n"))
-
-    if verbose:
-        print("Loaded promts:")
-        for i, p in enumerate(prompts):
-            print(f"{i:2d}: {p}")
-
-    return prompts
-
-
 def get_video_batch(
-    trajectories_path: str,
-    prepare_video: Callable,
-    n_frames: int,
-    verbose: bool = False,
-) -> torch.Tensor:
+    video_paths: list[str],
+) -> tuple[list[torch.Tensor], list[str]]:
     """Reads a list of video paths, loads videos, preprocess them with `prepare_video` function and arranges them in a batch."""
-    with open(trajectories_path, "r") as f:
-        video_paths = [line.rstrip("\n") for line in f.readlines()]
 
     # Preprocessing can be more efficient if done for the whole batch simultaniously
-    videos = torch.cat(
-        [
-            prepare_video(load_video(p), n_frames=n_frames, verbose=verbose)
-            for p in video_paths
-        ],
-        dim=0,
-    )
+    videos = [torch.from_numpy(load_video(p)) for p in video_paths]
 
     return videos, video_paths
 
@@ -59,6 +33,7 @@ def make_heatmap(
     result_dir: str,
     experiment_id: str,
 ):
+    plt.figure(figsize=(30, 30))
     sns.heatmap(
         similarity_matrix,
         annot=True,
