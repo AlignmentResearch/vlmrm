@@ -4,6 +4,8 @@ from typing import List, Protocol
 import open_clip
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import vlmrm.contrib.s3d as s3d
 from einops import rearrange, reduce
 from torch.amp.autocast_mode import autocast
 from vlmrm.contrib.open_clip.transform import VICLIP_MEAN, VICLIP_STD, image_transform
@@ -23,6 +25,10 @@ class VideoEncoder(Protocol):
         ...
 
 
+class Encoder(TextEncoder, VideoEncoder, Protocol):
+    ...
+
+
 class CLIP(nn.Module):
     def __init__(self, model_name: str, pretrained: str, cache_dir: str):
         super().__init__()
@@ -36,7 +42,6 @@ class CLIP(nn.Module):
         size = self._model.visual.image_size
         image_size: int = size if isinstance(size, int) else size[0]  # type: ignore
         self._transform = image_transform(image_size)
-        self.expected_n_frames = None
 
     @torch.inference_mode()
     def encode_text(self, x: List[str]) -> torch.Tensor:
@@ -125,6 +130,68 @@ class ViCLIP(nn.Module):
             # The episodes are the different samples in a batch
             # The window, i.e. the frames, are the one video
             window_embed = self._model.get_vid_features(x)
+            window_embed = rearrange(
+                window_embed, "(n_w n_e) d -> n_w n_e d", n_w=n_windows, n_e=n_episodes
+            )
+
+        return window_embed
+
+
+class S3D(nn.Module):
+    def __init__(
+        self, cache_dir: str, embedding_dim: int = 512, scale_factor: float = 1
+    ) -> None:
+        super().__init__()
+        embedding_dim = 512
+        self._model = s3d.S3D(f"{cache_dir}/s3d_dict.npy", embedding_dim)
+        self._model.load_state_dict(torch.load(f"{cache_dir}/s3d_howto100m.pth"))
+        self._model = self._model.eval()
+
+        self.scale_factor = scale_factor
+        self.expected_n_frames = 32
+
+    @torch.inference_mode()
+    def encode_text(self, x: List[str]) -> torch.Tensor:
+        return self._model.text_module(x)["text_embedding"]
+
+    def subsample(self, x: torch.Tensor) -> torch.Tensor:
+        n_frames, *_ = x.shape
+        step = n_frames // self.expected_n_frames
+        x = x[::step, ...][: self.expected_n_frames, ...]
+        return x
+
+    def _transform(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dtype not in (torch.float16, torch.float32, torch.float64):
+            x = x.float() / 255
+        x = F.interpolate(x, mode="bicubic", scale_factor=self.scale_factor)
+        x = x.clamp(0, 1)
+        return x
+
+    @torch.inference_mode()
+    def encode_video(self, x: torch.Tensor) -> torch.Tensor:
+        if x.shape[3] != 3:
+            x = x.permute(0, 1, 2, 5, 3, 4)
+        with torch.no_grad(), autocast("cuda", enabled=torch.cuda.is_available()):
+            n_frames, n_windows, n_episodes, *_ = x.shape
+
+            assert n_frames >= self.expected_n_frames
+
+            # Take only n_frames frames, evenly spaced
+            x = self.subsample(x)
+
+            x = rearrange(x, "n_f n_w n_e c h w -> (n_f n_w n_e) c h w")
+            x = self._transform(x)
+            x = rearrange(
+                x,
+                "(n_f n_w n_e) c h w -> (n_w n_e) c n_f h w",
+                n_f=self.expected_n_frames,
+                n_w=n_windows,
+                n_e=n_episodes,
+            )
+
+            # The episodes are the different samples in a batch
+            # The window, i.e. the frames, are the one video
+            window_embed = self._model(x)["video_embedding"]
             window_embed = rearrange(
                 window_embed, "(n_w n_e) d -> n_w n_e d", n_w=n_windows, n_e=n_episodes
             )
