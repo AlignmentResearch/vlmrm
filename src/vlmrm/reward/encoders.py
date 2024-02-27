@@ -13,14 +13,17 @@ from vlmrm.contrib.viclip import get_viclip
 
 
 class TextEncoder(Protocol):
+    # TODO Add the shapes
     def encode_text(self, x) -> torch.Tensor:
         ...
 
 
 class VideoEncoder(Protocol):
+    # TODO Add the shapes
     def encode_video(self, x: torch.Tensor) -> torch.Tensor:
         ...
 
+    # TODO Add the shapes
     def subsample(self, x: torch.Tensor) -> torch.Tensor:
         ...
 
@@ -30,7 +33,13 @@ class Encoder(TextEncoder, VideoEncoder, Protocol):
 
 
 class CLIP(nn.Module):
-    def __init__(self, model_name: str, pretrained: str, cache_dir: str):
+    def __init__(
+        self,
+        model_name: str,
+        pretrained: str,
+        cache_dir: str,
+        expected_n_frames: int = 32,
+    ):
         super().__init__()
 
         self._model: open_clip.model.CLIP = open_clip.create_model(
@@ -42,6 +51,7 @@ class CLIP(nn.Module):
         size = self._model.visual.image_size
         image_size: int = size if isinstance(size, int) else size[0]  # type: ignore
         self._transform = image_transform(image_size)
+        self.expected_n_frames = expected_n_frames
 
     @torch.inference_mode()
     def encode_text(self, x: List[str]) -> torch.Tensor:
@@ -57,6 +67,9 @@ class CLIP(nn.Module):
         return encoded
 
     def subsample(self, x: torch.Tensor) -> torch.Tensor:
+        n_frames, *_ = x.shape
+        step = n_frames // self.expected_n_frames
+        x = x[::step, ...][: self.expected_n_frames, ...]
         return x
 
     @torch.inference_mode()

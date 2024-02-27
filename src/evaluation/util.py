@@ -16,8 +16,8 @@ def load_video(path: str):
         return iio.imread(path, format="FFMPEG")
 
 
-def get_video_batch(video_paths: list[str]) -> list[torch.Tensor]:
-    return [torch.from_numpy(load_video(p)) for p in video_paths]
+def get_video_batch(video_paths: list[str], device) -> list[torch.Tensor]:
+    return [torch.from_numpy(load_video(p)).to(device) for p in video_paths]
 
 
 def make_heatmap(
