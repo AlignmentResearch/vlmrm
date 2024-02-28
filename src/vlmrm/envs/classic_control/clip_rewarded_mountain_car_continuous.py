@@ -16,6 +16,7 @@ class CLIPRewardedContinuousMountainCarEnv(GymContinuousMountainCarEnv):
         *,
         episode_length: int,
         render_mode: str = "rgb_array",
+        is_render: bool = False,
     ) -> None:
         super().__init__(render_mode)
         self.episode_length = episode_length
@@ -23,6 +24,8 @@ class CLIPRewardedContinuousMountainCarEnv(GymContinuousMountainCarEnv):
         self.success = False
         self.background_img = None
         self.car_img = None
+        self.num_resets = 0
+        self.is_render = is_render
 
     def step(self, action) -> Tuple[NDArray, float, bool, bool, Dict]:
         _, reward, _, truncated, info = super().step(action)
@@ -36,6 +39,7 @@ class CLIPRewardedContinuousMountainCarEnv(GymContinuousMountainCarEnv):
         self.num_steps += 1
         terminated = self.num_steps >= self.episode_length
         info["success"] = self.success
+
         return (
             np.array(self.state, dtype=np.float32),  # obs
             reward,

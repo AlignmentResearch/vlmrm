@@ -14,7 +14,7 @@ reward:
   # so that it can be shared among workers, and must be a divisor
   # of n_envs * episode_length so that all batches can be of the
   # same size (no support for variable batch size as of now.)
-  batch_size: 400
+  batch_size: 800
   alpha: 0.5 # Alpha value of Baseline CLIP (CO-RELATE)
   target_prompts: # Description of the goal state
     - pole vertically upright on top of the cart
@@ -27,7 +27,7 @@ reward:
 rl:
   policy_name: MlpPolicy
   n_steps: 3000000 # Total number of simulation steps to be collected.
-  n_envs_per_worker: 2 # Number of environments per worker (GPU)
+  n_envs_per_worker: 8 # Number of environments per worker (GPU)
   episode_length: 200 # Desired episode length
   learning_starts: 75000 # Number of env steps to collect before training
   train_freq: 200 # Number of collected env steps between training iterations

@@ -140,6 +140,7 @@ nohup.out
 output/
 runs/
 wandb/
+out/
 
 .DS_Store
 .vscode/
