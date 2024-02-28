@@ -46,6 +46,7 @@ class CLIP(nn.Module):
             model_name=model_name,
             pretrained=pretrained,
             cache_dir=cache_dir,
+            device="cuda" if torch.cuda.is_available() else "cpu",
         )  # type: ignore
         assert isinstance(self._model, open_clip.model.CLIP)
         size = self._model.visual.image_size
@@ -56,7 +57,9 @@ class CLIP(nn.Module):
     @torch.inference_mode()
     def encode_text(self, x: List[str]) -> torch.Tensor:
         tokens = open_clip.tokenize(x)
-        encoded = self._model.encode_text(tokens).float()
+        encoded = self._model.encode_text(
+            tokens.to("cuda" if torch.cuda.is_available() else "cpu")
+        ).float()
         encoded = encoded / encoded.norm(dim=-1, keepdim=True)
         print(f"{encoded.shape=}")
         return encoded
@@ -122,7 +125,7 @@ class ViCLIP(nn.Module):
     def encode_video(self, x: torch.Tensor) -> torch.Tensor:
         if x.shape[3] != 3:
             x = x.permute(0, 1, 2, 5, 3, 4)
-        with torch.no_grad(), autocast("cuda", enabled=torch.cuda.is_available()):
+        with autocast("cuda", enabled=torch.cuda.is_available()):
             n_frames, n_windows, n_episodes, *_ = x.shape
 
             assert n_frames >= self.expected_n_frames
@@ -184,7 +187,6 @@ class S3D(nn.Module):
     def encode_video(self, x: torch.Tensor) -> torch.Tensor:
         if x.shape[3] != 3:
             x = x.permute(0, 1, 2, 5, 3, 4)
-        with torch.no_grad(), autocast("cuda", enabled=torch.cuda.is_available()):
             n_frames, n_windows, n_episodes, *_ = x.shape
 
             assert n_frames >= self.expected_n_frames

@@ -219,9 +219,9 @@ class Sentence_Embedding(nn.Module):
         ]
         if words:
             we = self._zero_pad_tensor_token(th.LongTensor(words), self.max_words)
-            return we
         else:
-            return th.zeros(self.max_words).long()
+            we = th.zeros(self.max_words).long()
+        return we.to("cuda" if th.cuda.is_available() else "cpu")
 
     def _words_to_ids(self, x):
         split_x = [self._words_to_token(self._split_text(sent.lower())) for sent in x]

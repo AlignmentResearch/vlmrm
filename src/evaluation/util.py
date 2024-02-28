@@ -65,7 +65,7 @@ def make_heatmap(
         if not np.isnan(row).all():
             mask = np.isfinite(row)
             # Use the mask to ignore nan values when sorting
-            n = 5
+            n = 3
             top_n_indices = np.argsort(row[mask])[-n:]
             # Adjust the indices to account for the mask
             top_n_indices = np.arange(len(row))[mask][top_n_indices]
@@ -76,7 +76,7 @@ def make_heatmap(
                         0.5,
                         fill=False,
                         edgecolor="violet",
-                        lw=2 * (j + 1),
+                        lw=3 * (j + 1),
                     )
                 )
 

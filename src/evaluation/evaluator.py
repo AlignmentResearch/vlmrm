@@ -13,6 +13,7 @@ import vlmrm.reward.rewards as rewards
 from einops import rearrange
 from evaluation import util
 from torch import Tensor
+from torch.amp.autocast_mode import autocast
 from vlmrm.reward.encoders import CLIP, S3D, Encoder, ViCLIP
 
 
@@ -126,13 +127,6 @@ def load_video(path: str, n_frames=5):
     step = total_frames // n_frames
     b64_frames = b64_frames[::step][:n_frames]
 
-    # Save the frames to files
-    for i, b64_frame in enumerate(b64_frames):
-        imgdata = base64.b64decode(b64_frame)
-        filename = f"{path}_{i}.jpg"
-        with open(filename, "wb") as f:
-            f.write(imgdata)
-
     return b64_frames
 
 
@@ -163,7 +157,7 @@ The car has driven up a T-junction and turned left.
 
     for i, video in enumerate(videos):
         client = openai.OpenAI(
-            api_key="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"
+            api_key="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"
         )
         messages = [
             {"role": "system", "content": [{"type": "text", "text": prompt}]},
@@ -221,6 +215,7 @@ The car has driven up a T-junction and turned left.
     return matrix
 
 
+@autocast("cuda", enabled=torch.cuda.is_available())
 def main():
     args = parse_args()
 
@@ -270,13 +265,16 @@ def main():
             baselines = encoder.encode_text(data["baseline"].to_list())
             if args.alphas is None:
                 raise ValueError("Alpha must be provided when using projection reward.")
-            for alpha in [float(a) for a in args.alphas.split(",")]:
-                reward_fun = mk_projection_reward(alpha, baselines)
+            for alpha in args.alphas.split(","):
+                reward_fun = mk_projection_reward(float(alpha), baselines)
                 title = f"{args.model}_projection_{alpha}_{args.experiment_id}"
                 rewards.append((reward_fun, title))
 
     for reward_fun, title in rewards:
         reward_matrix = evaluate(encoder, videos, descriptions, reward_fun)
+        reward_matrix = (reward_matrix - reward_matrix.mean(dim=0, keepdim=True)) / (
+            reward_matrix.std(dim=0, keepdim=True) + 1e-6
+        )
         util.make_heatmap(
             reward_matrix.cpu().numpy(),
             groups=data["group"].to_list(),
