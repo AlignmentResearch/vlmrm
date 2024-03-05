@@ -3,12 +3,12 @@
 Add the following packages into your virtual environment:
 
 ```
-pip install imageio av seaborn
+pip install imageio av seaborn dotenv
 ```
 
 ## Models
 
-If you want to test S3D, download the required files into your cache directory (default: `.cache`). 
+If you want to test S3D, download the required files into your cache directory (default: `.cache`).
 
 ```sh
 cd .cache
@@ -27,7 +27,7 @@ OPENAI_API_KEY=
 
 ## Data
 
-In the project root, create a folder `data/evaluation` and put your videos in there. In the same directory, place a `data.csv` file contaning four columns: 
+In the project root, create a folder `data/evaluation` and put your videos in there. In the same directory, place a `data.csv` file contaning four columns:
 
 - `path`, path to an mp4 file with a video clip, e.g. `data/evaluation/straight_middle.mp4`
 - `baseline`, a baseline label for this video (used in projection rewards)

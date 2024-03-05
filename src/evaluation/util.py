@@ -65,8 +65,14 @@ def make_heatmap(
         if not np.isnan(row).all():
             mask = np.isfinite(row)
             # Use the mask to ignore nan values when sorting
-            n = 3
-            top_n_indices = np.argsort(row[mask])[-n:]
+            # Use the mask to ignore nan values when sorting
+            n = 2
+            # Get unique values and their indices
+            unique_values, unique_indices = np.unique(row[mask], return_inverse=True)
+            # Sort the unique values and get the indices of the top n
+            top_n_indices = np.argsort(unique_values)[-n:]
+            # Get the indices of the top n unique values in the original array
+            top_n_indices = np.where(np.isin(unique_indices, top_n_indices))[0]
             # Adjust the indices to account for the mask
             top_n_indices = np.arange(len(row))[mask][top_n_indices]
             for j, index in enumerate(top_n_indices):
@@ -76,7 +82,7 @@ def make_heatmap(
                         0.5,
                         fill=False,
                         edgecolor="violet",
-                        lw=3 * (j + 1),
+                        lw=6,
                     )
                 )
 

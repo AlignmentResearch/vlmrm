@@ -1,10 +1,12 @@
 import argparse
 import base64
+import json
 import re
 from pathlib import Path
 from typing import Callable
 
 import cv2
+import dotenv
 import numpy as np
 import openai
 import pandas as pd
@@ -60,6 +62,12 @@ def parse_args():
         "--output-dir",
         help="Directory to save evaluation results.",
         default="out",
+    )
+    parser.add_argument(
+        "--standardize",
+        help="Directory to save evaluation results.",
+        default=False,
+        action="store_true",
     )
     parser.add_argument("--cache-dir", default=".cache")
 
@@ -132,22 +140,27 @@ def load_video(path: str, n_frames=5):
 
 def gpt4(video_paths, descriptions):
     prompt = """
-You will be given five frames from a video depicting a red car, in chronological order. The camera is fixed on the car, so that the car always goes „up“. Take note: the car sometimes doesn't follow any roads at all and just rides on grass.
+You will be given five frames from a video depicting a red car. Important notes:
+- the frames are given in chronological order
+- the camera is fixed and doesn't move or rotate throughout the video
+- the car sometimes doesn't follow any roads at all and just rides on grass
+- the car sometimes DOES follow roads, so be sure to check this specifically
+- the car doesn't necessarily start at the bottom and go up; to observe the car's movement, you need to compare position of the car between the frames
 
-Describe what you see — focus on the relative positions of the depicted objects (car, roads, potential crossroads, etc), their orientation, and the changes between the frames. Be precise, but brief. Describe EACH OF THE FIVE FRAMES. The frames are NOT static and they DO change, although sometimes the change is small frame to frame.
+Your task is to describe what you see. Focus on the relative positions of the depicted objects (car, roads, potential crossroads, etc), their orientation, and the movement of the car between the frames. Be precise, but brief. Describe EACH OF THE FIVE FRAMES. The frames are NOT static and they DO change, although sometimes the change is small frame to frame.
 
 # EXAMPLE
 
 Input: [five frames]
 
 Assistant:
-0. The car was approaching a T-junction
-1. The car was approaching a T-junction
-2. The car was at the T-junction.
-3. The car appears to have turned left.
-4. The car continues along the left path
+0. The car is approaching a roundabout
+1. The car is now closer to the roundabout
+2. The car is at the roundabout, rode by the first exit
+3. The car appears to be taking the second exit
+4. The car continues along the road after the roundabout
 
-The car has driven up a T-junction and turned left.
+The car has moved through the roundabout and took the second exit.
     """
 
     # Subsample the frames from the videos
@@ -156,9 +169,17 @@ The car has driven up a T-junction and turned left.
     matrix = np.zeros((len(videos), len(descriptions)))
 
     for i, video in enumerate(videos):
-        client = openai.OpenAI(
-            api_key="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"
-        )
+        print("===========================")
+        print(video_paths[i])
+        print(descriptions[i])
+
+        # save the frames as separate images
+        for j, frame in enumerate(video):
+            with open(f"frames/{video_paths[i].split('/')[-1]}_{j}.jpg", "wb") as f:
+                f.write(base64.b64decode(frame))
+
+        dotenv.load_dotenv()
+        client = openai.OpenAI()  # API KEY should be loaded automatically by line above
         messages = [
             {"role": "system", "content": [{"type": "text", "text": prompt}]},
             {
@@ -171,6 +192,7 @@ The car has driven up a T-junction and turned left.
                             "image_url": {
                                 "url": f"data:image/jpeg;base64,{f}",
                                 "detail": "low",
+                                "resize": 512,
                             },
                         }
                         for f in video
@@ -185,14 +207,15 @@ The car has driven up a T-junction and turned left.
         messages.append(
             {"role": "assistant", "content": response.choices[0].message.content}
         )
+        print(response.choices[0].message.content)
         messages.append(
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "text",
-                        "text": "Now given this description, score the following potential video descriptions from 0 to 1 based on how well they fit the video/frames you've seen. Feel free to use values between 0 and 1, too. Multiple labels can have the same score.\n\nFormat: - [description]: [score]\n\n"
-                        + "\n".join([f"- {d}" for d in descriptions]),
+                        "text": 'Now, given this description, score the following potential video descriptions from 0 to 1 based on how well they fit the video/frames you\'ve seen. Feel free to use values between 0 and 1, too. Multiple labels can have the same score. The directions (e.g. "car turning left") are written from the POV of the driver of the car unless specified otherwise.\n\nFormat: \n- description: score\n\n'
+                        + "\n".join([f"- {d}" for d in set(descriptions)]),
                     }
                 ],
             }
@@ -211,6 +234,9 @@ The car has driven up a T-junction and turned left.
         }
 
         matrix[i, :] = [scores[d] for d in descriptions]
+
+        # with open("gpt4_scores.json", "w") as f:
+        #     json.dump(matrix.tolist(), f)
 
     return matrix
 
@@ -272,9 +298,10 @@ def main():
 
     for reward_fun, title in rewards:
         reward_matrix = evaluate(encoder, videos, descriptions, reward_fun)
-        reward_matrix = (reward_matrix - reward_matrix.mean(dim=0, keepdim=True)) / (
-            reward_matrix.std(dim=0, keepdim=True) + 1e-6
-        )
+        if args.standardize:
+            reward_matrix = (
+                reward_matrix - reward_matrix.mean(dim=0, keepdim=True)
+            ) / (reward_matrix.std(dim=0, keepdim=True) + 1e-6)
         util.make_heatmap(
             reward_matrix.cpu().numpy(),
             groups=data["group"].to_list(),
