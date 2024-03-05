@@ -3,7 +3,7 @@
 Add the following packages into your virtual environment:
 
 ```
-pip install imageio av seaborn dotenv
+pip install imageio av seaborn python-dotenv
 ```
 
 ## Models
