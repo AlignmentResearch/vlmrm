@@ -1,138 +1,87 @@
-# PyTorch S3D Text-Video trained HowTo100M
-This repo contains a PyTorch S3D Text-Video model trained from scratch on HowTo100M using MIL-NCE [1]
-If you use this model, we would appreciate if you could cite [1] and [2] :).
+# Quick Start
 
-The official Tensorflow hub version of this model can be found here: https://tfhub.dev/deepmind/mil-nce/s3d/1
-with a colab on how to use it here: https://colab.research.google.com/github/tensorflow/hub/blob/master/examples/colab/text_to_video_retrieval_with_s3d_milnce.ipynb
+Add the following packages into your virtual environment:
 
-## [MATS, David Lindner stream] Notes on environment
-One can use `vlmrm` after adding
 ```
-conda install imageio av seaborn pytest
+pip install imageio av seaborn
 ```
 
-## Getting the data
+## Models
 
-You will first need to download the model weights and the word dictionary.
+If you want to test S3D, download the required files into your cache directory (default: `.cache`). 
 
 ```sh
-mkdir checkpoints
-cd checkpoints
+cd .cache
 wget https://www.rocq.inria.fr/cluster-willow/amiech/howto100m/s3d_howto100m.pth
 wget https://www.rocq.inria.fr/cluster-willow/amiech/howto100m/s3d_dict.npy
 ```
 
+If you want to test ViCLIP, you should put `ViCLIP-L_InternVid-FLT-10M.pth` to the cache directory, too. You can get the file [here](https://huggingface.co/OpenGVLab/ViCLIP/tree/main).
 
-## How To use it ?
-
-### trajectory_evaluator
-1. Prepare a txt file (say `prompts/cheetah_prompts.txt`) with several prompts you want to compare against:
+If you want to test GPT-4V, you should put your API key into an .env file in the project-root:
 
 ```
-A stick model of a dog is actively running
-A stick model of a dog trying to move but failing
-A stick model of a dog doing weird things
-```
-Put one prompt per line.
-
-2. Prepare a txt file (say `trajectories_lists/cheetah.txt`) with several paths to trajectories in mp4 format: 
-```
-trajectories/cheetah_on_back_legs.mp4
-trajectories/cheetah_crawl.mp4
-trajectories/cheetah_slow.mp4
-```
-Put one path per line.
-
-3. Run
-```sh
-python s3d_evaluator.py \
-    -t trajectories_lists/cheetah.txt \
-    -p prompts/cheetah_prompts.txt \
-    -e EXPERIMENT_NAME \
-    [-o OUTPUT_DIRECTORY] \
-    [-v/--verbose] \
-    [--n-frames N_FRAMES]
-```
-This code will generate `OUTPUT_DIRECTORY/EXPERIMENT_NAME.png` with a similarity matrix as a heatmap (trajectory vs label). By default `OUTPUT_DIRECTORY` is set to `evaluation_results`.
-
-**Note:** I tried using softmax, but similarities might often be small, and probabilities become too close to each other, so for now I output unnormalized cosine similarities.
-
-**Note 2:** With S3D, I uniformly sample 32 frames from the whole video in order to be compatible with their training setup. With ViCLIP, I unformly sample 8 frames.
-
-### [instructions from original repo]
-The following code explain how to instantiate S3D Text-Video with the pretrained weights and run inference
-on some examples.
-
-```python
-import torch as th
-from s3dg import S3D
-
-# Instantiate the model
-net = S3D('checkpoint/s3d_dict.npy', 512)
-
-# Load the model weights
-net.load_state_dict(th.load('checkpoint/s3d_howto100m.pth'))
-
-# Video input should be of size Batch x 3 x T x H x W and normalized to [0, 1] 
-video = th.rand(2, 3, 32, 224, 224)
-
-# Evaluation mode
-net = net.eval()
- 
-# Video inference
-video_output = net(video)
-
-# Text inference
-text_output = net.text_module(['open door', 'cut tomato'])
-```
-NB: The video network is fully convolutional (with global average pooling in time and space at the end). However, we recommend using T=32 frames (same as during training), T=16 frames also works ok. For H and W we have been using values from 200 to 256.
-
-*video_output* is a dictionary containing two keys:
-- *video_embedding*: This is the video embedding (size 512) from the joint text-video space. It should be used to compute similarity scores with text inputs using the text embedding.
-- *mixed_5c*: This is the global averaged pooled feature from S3D of dimension 1024. This should be use for classification on downstream tasks.
-
-*text_output* is also a dictionary with a single key:
-- *text_embedding*: It is the text embedding (size 512) from the joint text-video space. To compute the similarity score between text and video, you would compute the dot product between *text_embedding* and *video_embedding*.
-
-## Computing all the pairwise video-text similarities:
-
-The similarity scores can be computed with a dot product between the *text_embedding* and the *video_embedding*.
-
-```python
-video_embedding = video_output['video_embedding']
-text_embedding = text_output['text_embedding']
-# We compute all the pairwise similarity scores between video and text.
-similarity_matrix = th.matmul(text_embedding, video_embedding.t())
+# .env
+OPENAI_API_KEY=
 ```
 
+## Data
 
-## References 
+In the project root, create a folder `data/evaluation` and put your videos in there. In the same directory, place a `data.csv` file contaning four columns: 
 
-[1] A. Miech, J.-B. Alayrac, L. Smaira, I. Laptev, J. Sivic and A. Zisserman,
-End-to-End Learning of Visual Representations from Uncurated Instructional Videos.
-https://arxiv.org/abs/1912.06430
+- `path`, path to an mp4 file with a video clip, e.g. `data/evaluation/straight_middle.mp4`
+- `baseline`, a baseline label for this video (used in projection rewards)
+- `label`, a target label for this video (used in all rewards)
+- `group`, a group identifier, can be any string (used in the matrix plotting code; different groups are separated by a blank space)
 
-[2] A. Miech, D. Zhukov, J.-B. Alayrac, M. Tapaswi, I. Laptev and J. Sivic, 
-HowTo100M: Learning a Text-Video Embedding by Watching Hundred Million Narrated Video Clips.
-https://arxiv.org/abs/1906.03327
+For example, data.csv might look like:
 
-
-Bibtex:
-
-```bibtex
-@inproceedings{miech19howto100m,
-   title={How{T}o100{M}: {L}earning a {T}ext-{V}ideo {E}mbedding by {W}atching {H}undred {M}illion {N}arrated {V}ideo {C}lips},
-   author={Miech, Antoine and Zhukov, Dimitri and Alayrac, Jean-Baptiste and Tapaswi, Makarand and Laptev, Ivan and Sivic, Josef},
-   booktitle={ICCV},
-   year={2019},
-}
-
-@inproceedings{miech19endtoend,
-   title={{E}nd-to-{E}nd {L}earning of {V}isual {R}epresentations from {U}ncurated {I}nstructional {V}ideos},
-   author={Miech, Antoine and Alayrac, Jean-Baptiste and Smaira, Lucas and Laptev, Ivan and Sivic, Josef and Zisserman, Andrew},
-   booktitle={CVPR},
-   year={2020},
-}
+```csv
+data/evaluation/intersection_forward_t->b.mp4,"topdown view of a cartoon red car standing in place","topdown view of a cartoon red car at an intersection, going forward",4.1
+data/evaluation/intersection_left_t->r.mp4,"topdown view of a cartoon red car standing in place","topdown view of a cartoon red car at an intersection, turning left",4.2
 ```
-# Acknowledgements
-We would like to thank Yana Hasson for the help provided in the non trivial porting of the original Tensorflow weights to PyTorch.
+
+## Running the evaluator
+
+Once your models and data are in place, you can set up the evaluation experinemt in the `run_evals.sh` script. By default, this is what the script looks like:
+
+```bash
+models=("clip" "viclip" "s3d" "gpt4")
+
+for model in "${models[@]}"; do
+    python src/evaluation/evaluator.py -t data/evaluation/data.csv -m "$model" -r logit,projection -a 0.0,0.25,0.50,0.75,1.0 -n 32 -e standardized_improved --standardize
+done
+```
+
+This will run the evaluator for each model in `models`. The evaluator will then load the given model (`-m`) and run a set of experiments on it, one experiment for each combination of hyperparameters. Each experiment will generate its own confusion matrix, saved by default in `out`. The hyperparameters are:
+    - method to compute reward (`-r`), used for non-gpt models
+    - alpha to use with the projection reward (`a`)
+    - number of frames to average over for the clip model (`-n`)
+    - whether to standardize the rewards or not (`--standardize`)
+    - the experiment name that is prefixed to all the generated matrices (`-e`)
+
+One you edit `run_evals.sh` with the hyperparameters you want to use, you can run it like this:
+
+```shell
+sbatch run_evals.sh
+```
+
+## Architecture
+
+This is only a high-level overview, ask Evžen for details. Do not spend too much time trying to figure out things on your own :-)
+
+The evaluator loads a model. All the models (but GPT-4V) have a common interface called `Encoder`. Encoders can encode both text and videos and are specified in `src/vlmrm/reward/encoders.py`. If you want to add another model to eval, implementing the Encoder interface for it would be the place to start.
+
+Encoders expect the video to come pre-segmented into pieces called windows. Windows can overlap, but have all the same length, which we call `n_frames` below. In addition, because the class is used by vlmrm, the videos are expected to come from multiple episodes. The complete type of `encode_videos` is then:
+
+```haskell
+encode_video :: (n_frames n_windows n_episodes c h w) -> (n_windows n_episodes embed_dim)
+```
+
+Once we have the encodings for each window, we can pass them to a `Reward` function — this is again an interface which you'd need to implement if you wanted to support additional reward functions. It is specified in `src/vlmrm/reward/rewards.py`. A reward is a stateful function that computes a reward for every window it is passed; i.e. its type is:
+
+```
+reward :: (n_windows n_episodes embed_dim) -> (n_windows n_episodes)
+```
+
+I said _stateful_ function since, by default, the reward needs to be initialized first with the target label wrt which the reward should be computed. This is again caused by this interface being used in vlmrm. Feel free to implement your own reward function that get the target label on each call (or see `projection_reward` and `logit_reward` in `src/vlmrm/reward/rewards.py`).
