@@ -25,6 +25,8 @@ If you want to test GPT-4V, you should put your API key into an .env file in the
 OPENAI_API_KEY=
 ```
 
+If you want to test CLIP, refer to the main repo README.
+
 ## Data
 
 In the project root, create a folder `data/evaluation` and put your videos in there. In the same directory, place a `data.csv` file contaning four columns:
