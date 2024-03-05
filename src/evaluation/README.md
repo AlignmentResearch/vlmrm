@@ -80,7 +80,7 @@ encode_video :: (n_frames n_windows n_episodes c h w) -> (n_windows n_episodes e
 
 Once we have the encodings for each window, we can pass them to a `Reward` function — this is again an interface which you'd need to implement if you wanted to support additional reward functions. It is specified in `src/vlmrm/reward/rewards.py`. A reward is a stateful function that computes a reward for every window it is passed; i.e. its type is:
 
-```
+```haskell
 reward :: (n_windows n_episodes embed_dim) -> (n_windows n_episodes)
 ```
 
