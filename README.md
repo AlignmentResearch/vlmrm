@@ -1,6 +1,6 @@
 # `vlmrm`
 
-This is the repository from the paper "[Vision-Language Models are Zero-Shot Reward Models for Reinforcement Learning](https://arxiv.org/abs/2310.12921)". We provide training scripts that can be used to reproduce our experiments, and a Python package that can be installed with pip and imported from another project.
+This is the repository from the paper "[Vision-Language Models are Zero-Shot Reward Models for Reinforcement Learning](https://openreview.net/forum?id=N0I2RtD8je)" (ICLR 2024). We provide training scripts that can be used to reproduce our experiments, and a Python package that can be installed with pip and imported from another project.
 
 Instead of manually specifying reward functions or relying on extensive human feedback to train your reinforcement learning agents, you can now use `vlmrm` to specify tasks from only natural language prompts by leveraging pretrained vision-language models (VLMs) as zero-shot reward models (RMs).
 
@@ -17,11 +17,13 @@ We provide implementations for:
 You can cite our work by using the following BibTex file:
 
 ```bibtex
-@article{rocamonde_2023_vision,
-  title={{Vision-Language} {Models} are {Zero-Shot} {Reward} {Models} for {Reinforcement} {Learning}},
-  author={Rocamonde, Juan and Montesinos, Victoriano and Nava, Elvis and Perez, Ethan and Lindner, David},
-  journal={arXiv preprint arXiv:2310.12921},
-  year={2023}
+@inproceedings{
+    rocamonde2024visionlanguage,
+    title={Vision-Language Models are Zero-Shot Reward Models for Reinforcement Learning},
+    author={Juan Rocamonde and Victoriano Montesinos and Elvis Nava and Ethan Perez and David Lindner},
+    booktitle={The Twelfth International Conference on Learning Representations},
+    year={2024},
+    url={https://openreview.net/forum?id=N0I2RtD8je}
 }
 ```
 
