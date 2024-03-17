@@ -14,7 +14,7 @@ We provide implementations for:
 
 ## Citation
 
-You can cite our work by using the following BibTex file:
+You can cite our work by using the following BibTex entry:
 
 ```bibtex
 @inproceedings{
