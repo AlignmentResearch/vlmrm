@@ -21,12 +21,11 @@ def main(n_envs: int = 0):
             render_mode="rgb_array"
         )
         return env
-         
 
     venv = make_vec_env(
         make_env,
         vec_env_cls=SubprocVecEnv if n_envs > 1 else DummyVecEnv,
-        vec_env_kwargs=dict(render_dim=(480, 480)),
+        vec_env_kwargs=dict(render_dim=(480, 480, 3)),
         n_envs=n_envs,
         verbose=True,
     )
