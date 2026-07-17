@@ -28,7 +28,7 @@ setup(
         "pyopengl_accelerate==3.1.7",
         "stable_baselines3==2.0.0",
         "tensorboard==2.14.0",
-        "torch==2.0.1",
+        "torch==2.13.0",
         "tqdm==4.66.1",
         "typer[all]==0.9.0",
         "wandb==0.15.8",
