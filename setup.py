@@ -21,7 +21,7 @@ setup(
         "open_clip_torch==2.20.0",
         "opencv-contrib-python==4.8.0.76",
         "pandas==2.0.3",
-        "pillow==10.0.0",
+        "pillow==12.3.0",
         "pydantic==2.2.1",
         "pygame==2.1.3",
         "pyopengl==3.1.7",
