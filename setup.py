@@ -11,7 +11,7 @@ setup(
     install_requires=[
         "boto3==1.28.43",
         "einops==0.6.1",
-        "gitpython==3.1.32",
+        "gitpython==3.1.58",
         "gymnasium[classic_control,mujoco]==0.28.1",
         "imageio==2.31.3",
         "loguru==0.7.0",
